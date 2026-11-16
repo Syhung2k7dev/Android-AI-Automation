@@ -65,6 +65,8 @@ class AutomationAccessibilityService : AccessibilityService() {
         stopSequence()
         cancelPointPicker()
         cancelOcrCapture()
+        cancelGeminiAnalysis()
+        cancelTemplateLearning()
     }
 
     override fun onDestroy() {
@@ -232,7 +234,7 @@ class AutomationAccessibilityService : AccessibilityService() {
     }
 
     private fun captureForImageCondition(condition: WorkflowStep.WaitForImage) {
-        if (!running || conditionCaptureInFlight) return
+        if (!running || paused || conditionCaptureInFlight) return
         if (SystemClock.elapsedRealtime() >= conditionDeadline) {
             stopSequence()
             Toast.makeText(this, "Image condition timed out. Workflow stopped.", Toast.LENGTH_LONG).show()
@@ -987,6 +989,8 @@ class AutomationAccessibilityService : AccessibilityService() {
 
             service.cancelPointPicker()
             service.cancelOcrCapture()
+            service.cancelGeminiAnalysis()
+            service.cancelTemplateLearning()
             service.stopSequence()
             service.workflowQueue = workflows.map { it.toList() }
             service.queueIndex = 0
@@ -1022,6 +1026,7 @@ class AutomationAccessibilityService : AccessibilityService() {
             service.cancelTemplateLearning()
             service.cancelPointPicker()
             service.cancelOcrCapture()
+            service.cancelGeminiAnalysis()
             service.stopSequence()
             Toast.makeText(service, "Switch to the intended screen. The selected rectangle will be saved locally in 8 seconds.", Toast.LENGTH_LONG).show()
             service.templateLearningRunnable = Runnable {
@@ -1037,6 +1042,7 @@ class AutomationAccessibilityService : AccessibilityService() {
             if (key.isNullOrBlank()) return false
             service.cancelPointPicker()
             service.cancelOcrCapture()
+            service.cancelTemplateLearning()
             service.cancelGeminiAnalysis()
             service.stopSequence()
             service.getSharedPreferences(GEMINI_RESULT_PREFS, MODE_PRIVATE).edit().clear().apply()
@@ -1053,6 +1059,8 @@ class AutomationAccessibilityService : AccessibilityService() {
             val service = instance ?: return false
             service.cancelPointPicker()
             service.cancelOcrCapture()
+            service.cancelGeminiAnalysis()
+            service.cancelTemplateLearning()
             service.stopSequence()
             service.getSharedPreferences(OCR_PREFS, MODE_PRIVATE).edit()
                 .remove("result")
@@ -1076,6 +1084,8 @@ class AutomationAccessibilityService : AccessibilityService() {
             if (target !in setOf("tap", "swipe_start", "swipe_end")) return false
             service.cancelPointPicker()
             service.cancelOcrCapture()
+            service.cancelGeminiAnalysis()
+            service.cancelTemplateLearning()
             service.stopSequence()
             service.pointPickerTarget = target
             Toast.makeText(
