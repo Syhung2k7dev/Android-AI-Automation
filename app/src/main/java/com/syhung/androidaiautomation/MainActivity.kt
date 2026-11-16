@@ -577,8 +577,8 @@ class MainActivity : Activity() {
     }
 
     private fun confirmStart() {
-        if (steps.isEmpty()) {
-            status.text = "Add at least one workflow step first."
+        if (!WorkflowStep.validateStructure(steps)) {
+            status.text = "Complete every IF block with a matching END IF before running."
             return
         }
         val repeat = repeatInput.text.toString().toIntOrNull()
@@ -609,6 +609,10 @@ class MainActivity : Activity() {
         val name = profileInput.text.toString().trim()
         if (name.isEmpty() || steps.isEmpty()) {
             status.text = "Enter a profile name and add at least one step."
+            return
+        }
+        if (!WorkflowStep.validateStructure(steps)) {
+            status.text = "Complete every IF block with a matching END IF before saving."
             return
         }
         val encoded = steps.joinToString("\n") { it.encode() }
