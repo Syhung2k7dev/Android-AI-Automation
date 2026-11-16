@@ -53,7 +53,7 @@ A user-started workflow runs with a visible foreground notification and an acces
 
 ## Security and permissions
 
-The app uses Accessibility for user-configured actions. The screenshot capability is used only after a separate in-app confirmation, with a single capture after a short switch window. The image is processed on-device and is not written to storage or uploaded. Recognized text is temporarily stored locally until the app displays it or the user clears it.
+The app uses Accessibility for user-configured actions. OCR, template matching, pHash checks, and local template learning process images on-device. Gemini visual analysis is a separate opt-in feature: after an explicit confirmation and an 8-second switch window, one compressed screenshot is uploaded to Google's Gemini API. Do not approve uploads of private or sensitive screens. The app does not retain the screenshot after processing; recognized text and the model's analysis result are temporarily stored locally until displayed or cleared.
 
 Do not capture private or sensitive screens. Some secure or protected windows may prevent screenshots. The app must not hide its operation, bypass Android security controls, evade Play Protect, bypass anti-cheat systems, or interact with protected screens without authorization.
 
