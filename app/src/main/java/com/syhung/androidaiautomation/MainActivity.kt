@@ -56,6 +56,9 @@ class MainActivity : Activity() {
             setPadding(0, 16, 0, 16)
         }
         root.addView(status, matchWidth())
+        root.addView(button("Open CoC AI Companion dashboard") {
+            startActivity(Intent(this, com.syhung.androidaiautomation.agent.AgentDashboardActivity::class.java))
+        }, matchWidth())
 
         profileInput = field("Profile name", "My workflow")
         xInput = field("Start / tap X coordinate", "540")
