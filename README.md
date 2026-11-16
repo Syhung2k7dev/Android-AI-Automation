@@ -15,21 +15,26 @@ An independent Android automation prototype built around explicit user control a
 - Explicit run confirmation, five-second start delay, finite repeats, and Stop control.
 - User-confirmed one-shot OCR plus workflow text conditions that poll screenshots locally until a configured phrase appears or the timeout expires.
 - OCR results are temporarily stored locally for display; screenshots used by local OCR and image matching are processed on-device and are not uploaded.
-- Local visual matching: import a user-selected image template, store it in app-private storage, and add a bounded wait-until-image-matches workflow step. Matching uses downscaled grayscale normalized cross-correlation on-device; it is not the OpenCV library.
-- Optional Gemini cloud foundation: API key stored with AndroidX encrypted preferences backed by Android Keystore, explicit connection test, bounded retries, persistent failure circuit breaker, and token/request counters.
-- Cloud API use is opt-in and explicit. The current integration tests text-only requests; it does not upload screenshots or automatically trigger cloud recovery.
+- Local visual matching: import a user-selected image template or learn a crop from a user-confirmed screen region, store it in app-private storage, and add bounded wait-until-image-matches or IF-image steps. Native OpenCV `matchTemplate` is used when its Android native library initializes; the Kotlin matcher remains a fallback.
+- Optional Gemini cloud analysis: API key stored with AndroidX encrypted preferences backed by Android Keystore; explicit screenshot-upload consent; multimodal screenshot analysis; bounded retries, persistent failure circuit breaker, rolling RPM and token counters, and one bounded JSON schema-repair request.
+- Cloud screenshot analysis is opt-in and requires a separate confirmation each time. Model output is shown as a suggestion only; it is never executed as gestures or used to mutate a running workflow automatically.
+- Versioned JSON workflow import/export (version 2), backward-compatible with the earlier line-based format; supports tap, swipe, wait, wait-for-text, wait-for-image, nested IF text/image, ELSE, and END IF blocks.
+- Sequential saved-profile queue: up to 20 profiles, explicit confirmation, 50 steps per profile.
+- Floating accessibility dashboard with Pause/Resume/Stop controls and a visible foreground notification during user-started execution.
+- Perceptual-hash screen inactivity watchdog; after repeated unchanged screen samples during a gesture step, it pauses for user review instead of taking recovery actions.
+- One-shot cooldown reminders scheduled with `AlarmManager.setAndAllowWhileIdle`; no periodic polling is performed while waiting, and reminders never auto-start workflows.
 - Current workflow limits: 50 steps and 20 repeats.
 - OCR condition defaults: 30-second timeout, 2-second polling interval; both are bounded to avoid indefinite capture loops.
 
-This remains an early development build, not the complete product. OCR and basic local image conditions are implemented as bounded wait steps, and saved profiles can be queued sequentially after explicit confirmation. Branching, persistent scheduled timers, a dedicated foreground dashboard, and cloud visual recovery are not yet implemented. Queue execution requires the Accessibility Service to remain connected.
+This remains an early development build. The current visual recovery module analyzes a screenshot only after explicit user consent and displays a structured suggestion; it does not automatically execute AI output. Template learning requires the user to choose a crop region. Cooldown scheduling currently provides one-shot reminders, not unattended recurring workflow execution. Device-level performance and ColorOS compatibility still require testing.
 
-## Not implemented
+## Remaining work
 
-- Advanced OpenCV-accelerated matching, multi-scale matching, and image-absence conditions.
-- OCR branching beyond the current wait-until-text-appears step.
-- Scheduling and foreground execution controls.
-- Screenshot-based Gemini recovery and structured workflow mutation are not yet implemented; the current cloud integration is a text-only connection foundation.
-- Production release signing and distribution review.
+- Multi-scale matching, image-absence conditions, and robust visual-region tracking.
+- Recurring calendar-like schedules, reboot restoration, and profile-specific cooldown timers.
+- Full unattended recovery is intentionally not enabled: Gemini suggestions require review and are never blindly dispatched as gestures.
+- Automated template learning from reviewed and user-approved visual examples; current template capture is user-selected and local.
+- Production release signing, security review, and Play Protect / distribution verification.
 
 ## Platform target
 
@@ -41,6 +46,10 @@ This remains an early development build, not the complete product. OCR and basic
 ## Optional Gemini API settings
 
 Users may enter or remove their own Gemini API key in the app. The key is stored locally with encrypted preferences backed by Android Keystore. A separate user action is required to test the connection. The current integration sends only a short text test prompt, tracks API-reported token usage, retries transient network/server failures with bounded exponential backoff, and opens a five-minute circuit breaker after repeated failures. Cloud use is optional; local workflows remain available without a key. No screenshot is uploaded by the current implementation. API keys and requests are sensitive: do not share them, and review Google's API terms, data handling, and billing before enabling cloud access.
+
+## Runtime controls
+
+A user-started workflow runs with a visible foreground notification and an accessibility overlay dashboard. The pHash watchdog samples only while a gesture step is active; repeated near-identical screens pause the workflow for user review. Pause cancels scheduled polling, and Stop cancels the queue. The cooldown scheduler uses an inexact `AlarmManager` reminder; it does not launch or resume automation by itself. Android and ColorOS may delay alarms or terminate services under battery-management policies.
 
 ## Security and permissions
 
@@ -66,9 +75,8 @@ The implementation is original and does not copy Smart AutoClicker's source. Any
 
 ## Roadmap
 
-1. Device compatibility and execution reliability checks.
-2. Advanced OpenCV-based image matching and visual conditions.
-3. Expand OCR conditions into explicit if/else branching.
-4. Scheduling with visible status and reliable cancellation.
-5. Optional, bounded AI-assisted recovery.
-6. Release signing, distribution review, and security verification.
+1. Device compatibility and execution reliability checks on Oppo Reno6 Z / ColorOS.
+2. Multi-scale visual matching and image-absence conditions.
+3. Recurring timers and reboot restoration.
+4. User-reviewed template suggestions and improved recovery diagnostics.
+5. Release signing, distribution review, and security verification.
