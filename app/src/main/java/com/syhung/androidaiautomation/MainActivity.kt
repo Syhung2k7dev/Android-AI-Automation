@@ -10,6 +10,7 @@ import android.view.ViewGroup
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
 
 class MainActivity : Activity() {
@@ -17,8 +18,13 @@ class MainActivity : Activity() {
     private lateinit var profileInput: EditText
     private lateinit var xInput: EditText
     private lateinit var yInput: EditText
-    private lateinit var intervalInput: EditText
-    private lateinit var countInput: EditText
+    private lateinit var endXInput: EditText
+    private lateinit var endYInput: EditText
+    private lateinit var durationInput: EditText
+    private lateinit var waitInput: EditText
+    private lateinit var repeatInput: EditText
+    private lateinit var stepsView: TextView
+    private val steps = mutableListOf<WorkflowStep>()
 
     private val preferences by lazy {
         getSharedPreferences("automation_profiles", MODE_PRIVATE)
@@ -30,7 +36,7 @@ class MainActivity : Activity() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
-            setPadding(32, 36, 32, 24)
+            setPadding(28, 28, 28, 24)
         }
 
         root.addView(TextView(this).apply {
@@ -40,52 +46,62 @@ class MainActivity : Activity() {
 
         status = TextView(this).apply {
             textSize = 15f
-            setPadding(0, 18, 0, 18)
+            setPadding(0, 16, 0, 16)
         }
         root.addView(status, matchWidth())
 
-        profileInput = field("Profile name", "My first profile")
-        xInput = field("Tap X coordinate", "540")
-        yInput = field("Tap Y coordinate", "900")
-        intervalInput = field("Interval in milliseconds (minimum 500)", "1500")
-        countInput = field("Maximum taps (1–1000)", "20")
+        profileInput = field("Profile name", "My workflow")
+        xInput = field("Start / tap X coordinate", "540")
+        yInput = field("Start / tap Y coordinate", "900")
+        endXInput = field("Swipe end X coordinate", "540")
+        endYInput = field("Swipe end Y coordinate", "500")
+        durationInput = field("Tap / swipe duration in ms (50–10000)", "300")
+        waitInput = field("Wait duration in ms (100–60000)", "1000")
+        repeatInput = field("Repeat workflow (1–20)", "1")
 
-        listOf(profileInput, xInput, yInput, intervalInput, countInput)
-            .forEach { root.addView(it, matchWidth()) }
+        listOf(
+            profileInput, xInput, yInput, endXInput, endYInput,
+            durationInput, waitInput, repeatInput
+        ).forEach { root.addView(it, matchWidth()) }
 
-        root.addView(button("Save profile") {
-            saveProfile()
+        root.addView(button("Add tap step") { addTap() }, matchWidth())
+        root.addView(button("Add swipe step") { addSwipe() }, matchWidth())
+        root.addView(button("Add wait step") { addWait() }, matchWidth())
+        root.addView(button("Remove last step") {
+            if (steps.isNotEmpty()) steps.removeAt(steps.lastIndex)
+            renderSteps()
+        }, matchWidth())
+        root.addView(button("Clear workflow") {
+            steps.clear()
+            renderSteps()
         }, matchWidth())
 
-        root.addView(button("Load profile") {
-            loadProfile()
-        }, matchWidth())
+        stepsView = TextView(this).apply {
+            textSize = 14f
+            setPadding(0, 14, 0, 14)
+        }
+        root.addView(stepsView, matchWidth())
+        renderSteps()
 
+        root.addView(button("Save workflow on this device") { saveProfile() }, matchWidth())
+        root.addView(button("Load workflow") { loadProfile() }, matchWidth())
         root.addView(button("Open Accessibility settings") {
             startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
         }, matchWidth())
-
-        root.addView(button("Start tapping") {
-            val values = readValues()
-            if (values == null) {
-                status.text = "Invalid values. Check coordinates, interval and tap count."
-            } else {
-                confirmStart(values)
-            }
-        }, matchWidth())
-
+        root.addView(button("Run workflow") { confirmStart() }, matchWidth())
         root.addView(button("Stop") {
             AutomationAccessibilityService.stop()
-            status.text = "Stopped. Any pending start countdown was cancelled."
+            status.text = "Stopped. Pending start and remaining steps were cancelled."
         }, matchWidth())
 
         root.addView(TextView(this).apply {
-            text = "Privacy and control: profiles stay on this device. This build does not request internet access or read screen contents. Starting requires confirmation and has a 5-second switch-to-target countdown. The tap sequence is finite (1–1,000 taps); return to this app and press Stop to cancel it. Use only on screens and in apps you are authorized to control. Image recognition, OCR, visual point selection, scheduling and AI recovery are not included in this build."
+            text = "Local workflow editor: build a sequence of taps, swipes and waits. Workflows are stored only on this device. Each run requires confirmation and has a 5-second countdown. Limit: 50 steps and 20 repeats. Stop cancels the sequence. This build does not read screen contents, use OCR, capture the screen or connect to a cloud AI service. Use only with apps and screens you are authorized to control."
             textSize = 13f
-            setPadding(0, 20, 0, 0)
+            setPadding(0, 18, 0, 0)
         }, matchWidth())
 
-        setContentView(root)
+        val scroll = ScrollView(this).apply { addView(root) }
+        setContentView(scroll)
         refreshStatus()
     }
 
@@ -94,69 +110,117 @@ class MainActivity : Activity() {
         if (::status.isInitialized) refreshStatus()
     }
 
-    private fun confirmStart(values: TapValues) {
+    private fun addTap() {
+        val point = readPoint() ?: return invalidInput()
+        val duration = durationInput.text.toString().toLongOrNull()
+            ?.takeIf { it in 50L..10_000L } ?: return invalidInput()
+        addStep(WorkflowStep.Tap(point.first, point.second, duration))
+    }
+
+    private fun addSwipe() {
+        val start = readPoint() ?: return invalidInput()
+        val endX = endXInput.text.toString().toFloatOrNull()
+            ?.takeIf { it >= 0f } ?: return invalidInput()
+        val endY = endYInput.text.toString().toFloatOrNull()
+            ?.takeIf { it >= 0f } ?: return invalidInput()
+        val duration = durationInput.text.toString().toLongOrNull()
+            ?.takeIf { it in 50L..10_000L } ?: return invalidInput()
+        addStep(WorkflowStep.Swipe(start.first, start.second, endX, endY, duration))
+    }
+
+    private fun addWait() {
+        val duration = waitInput.text.toString().toLongOrNull()
+            ?.takeIf { it in 100L..60_000L } ?: return invalidInput()
+        addStep(WorkflowStep.Wait(duration))
+    }
+
+    private fun addStep(step: WorkflowStep) {
+        if (steps.size >= 50) {
+            status.text = "Workflow limit reached: 50 steps."
+            return
+        }
+        steps.add(step)
+        renderSteps()
+        status.text = "Step added."
+    }
+
+    private fun readPoint(): Pair<Float, Float>? {
+        val x = xInput.text.toString().toFloatOrNull() ?: return null
+        val y = yInput.text.toString().toFloatOrNull() ?: return null
+        if (x < 0f || y < 0f) return null
+        return x to y
+    }
+
+    private fun confirmStart() {
+        if (steps.isEmpty()) {
+            status.text = "Add at least one workflow step first."
+            return
+        }
+        val repeat = repeatInput.text.toString().toIntOrNull()
+            ?.takeIf { it in 1..20 } ?: return invalidInput()
+        val description = steps.mapIndexed { index, step ->
+            "${index + 1}. ${step.displayText()}"
+        }.joinToString("\n")
+
         AlertDialog.Builder(this)
-            .setTitle("Confirm tap sequence")
+            .setTitle("Confirm workflow")
             .setMessage(
-                "The app will send ${values.count} taps at X=${values.x}, Y=${values.y}, " +
-                    "with ${values.interval} ms between taps. The first tap starts after 5 seconds, " +
-                    "so you can switch to the intended screen. This action does not inspect screen content. " +
-                    "Return to Android AI Automation and press Stop to cancel."
+                "Run ${steps.size} steps, repeated ${repeat} time(s)?\n\n" +
+                    description +
+                    "\n\nThe first action starts after 5 seconds. Press Stop in this app to cancel."
             )
             .setNegativeButton("Cancel", null)
-            .setPositiveButton("I understand — start") { _, _ ->
-                if (!AutomationAccessibilityService.start(
-                        values.x, values.y, values.interval, values.count
-                    )) {
-                    status.text = "Accessibility service is not connected. Enable it in Android Settings."
+            .setPositiveButton("Confirm and run") { _, _ ->
+                if (AutomationAccessibilityService.start(steps.toList(), repeat)) {
+                    status.text = "Workflow armed. Switch to the intended screen; it starts in 5 seconds."
                 } else {
-                    status.text = "Armed. Switch to the intended screen now; the first tap starts in 5 seconds."
+                    status.text = "Service is not connected or the workflow settings are invalid."
                 }
             }
             .show()
     }
 
-    private fun readValues(): TapValues? {
-        val x = xInput.text.toString().toFloatOrNull() ?: return null
-        val y = yInput.text.toString().toFloatOrNull() ?: return null
-        val interval = intervalInput.text.toString().toLongOrNull() ?: return null
-        val count = countInput.text.toString().toIntOrNull() ?: return null
-
-        if (x < 0 || y < 0 || interval < 500 || count !in 1..1000) return null
-        return TapValues(x, y, interval, count)
-    }
-
     private fun saveProfile() {
         val name = profileInput.text.toString().trim()
-        val values = readValues()
-        if (name.isEmpty() || values == null) {
-            status.text = "Enter a profile name and valid tap settings before saving."
+        if (name.isEmpty() || steps.isEmpty()) {
+            status.text = "Enter a profile name and add at least one step."
             return
         }
-
-        preferences.edit()
-            .putFloat("${name}.x", values.x)
-            .putFloat("${name}.y", values.y)
-            .putLong("${name}.interval", values.interval)
-            .putInt("${name}.count", values.count)
-            .putString("last_profile", name)
-            .apply()
-
-        status.text = "Profile saved on this device: $name"
+        val encoded = steps.joinToString("\n") { it.encode() }
+        preferences.edit().putString("workflow.$name", encoded).apply()
+        status.text = "Workflow saved locally: $name"
     }
 
     private fun loadProfile() {
         val name = profileInput.text.toString().trim()
-        if (name.isEmpty() || !preferences.contains("${name}.x")) {
-            status.text = "Profile not found. Enter the exact name of a saved profile."
+        val encoded = preferences.getString("workflow.$name", null)
+        if (name.isEmpty() || encoded == null) {
+            status.text = "Workflow not found. Enter the exact saved profile name."
             return
         }
+        val decoded = encoded.lines().mapNotNull { WorkflowStep.decode(it) }
+        if (decoded.isEmpty() || decoded.size > 50) {
+            status.text = "Saved workflow is invalid or exceeds the 50-step limit."
+            return
+        }
+        steps.clear()
+        steps.addAll(decoded)
+        renderSteps()
+        status.text = "Workflow loaded: $name"
+    }
 
-        xInput.setText(preferences.getFloat("${name}.x", 540f).toString())
-        yInput.setText(preferences.getFloat("${name}.y", 900f).toString())
-        intervalInput.setText(preferences.getLong("${name}.interval", 1500L).toString())
-        countInput.setText(preferences.getInt("${name}.count", 20).toString())
-        status.text = "Profile loaded: $name"
+    private fun renderSteps() {
+        stepsView.text = if (steps.isEmpty()) {
+            "Workflow steps: none"
+        } else {
+            "Workflow steps ( ${steps.size}/50 ):\n" +
+                steps.mapIndexed { index, step -> "${index + 1}. ${step.displayText()}" }
+                    .joinToString("\n")
+        }
+    }
+
+    private fun invalidInput() {
+        status.text = "Invalid input. Coordinates must be non-negative; check the duration limits."
     }
 
     private fun refreshStatus() {
@@ -182,12 +246,5 @@ class MainActivity : Activity() {
     private fun matchWidth() = LinearLayout.LayoutParams(
         ViewGroup.LayoutParams.MATCH_PARENT,
         ViewGroup.LayoutParams.WRAP_CONTENT
-    )
-
-    private data class TapValues(
-        val x: Float,
-        val y: Float,
-        val interval: Long,
-        val count: Int
     )
 }
