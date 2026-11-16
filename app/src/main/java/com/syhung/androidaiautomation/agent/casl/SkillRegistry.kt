@@ -66,5 +66,22 @@ class SkillRegistry(context: Context) {
         }
     }
 
+
+    fun listRecent(limit: Int = 100): List<RegisteredSkill> {
+        val c = helper.readableDatabase.rawQuery(
+            "SELECT s.skill_id, s.revision, s.status, s.manifest_json, s.workflow_json " +
+                "FROM skill_revisions s INNER JOIN (SELECT skill_id, MAX(revision) AS revision FROM skill_revisions GROUP BY skill_id) latest " +
+                "ON latest.skill_id = s.skill_id AND latest.revision = s.revision ORDER BY s.created_at DESC LIMIT ?",
+            arrayOf(limit.coerceIn(1, 500).toString())
+        )
+        val result = mutableListOf<RegisteredSkill>()
+        c.use {
+            while (it.moveToNext()) result += RegisteredSkill(
+                it.getString(0), it.getLong(1), it.getString(2), it.getString(3), it.getString(4)
+            )
+        }
+        return result
+    }
+
     fun close() = helper.close()
 }
