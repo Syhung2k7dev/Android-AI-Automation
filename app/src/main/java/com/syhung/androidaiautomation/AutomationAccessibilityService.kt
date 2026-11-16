@@ -30,6 +30,7 @@ class AutomationAccessibilityService : AccessibilityService() {
     private var repeatLimit = 1
     private var repeatIndex = 0
     private var startRunnable: Runnable? = null
+    private var sequenceRunnable: Runnable? = null
     private var pointPickerRunnable: Runnable? = null
     private var pointPickerView: View? = null
     private var pointPickerTarget: String? = null
@@ -65,14 +66,14 @@ class AutomationAccessibilityService : AccessibilityService() {
                 return
             }
             stepIndex = 0
-            handler.postDelayed({ executeNextStep() }, STEP_GAP_MS)
+            scheduleNextStep(STEP_GAP_MS)
             return
         }
 
         when (val step = steps[stepIndex]) {
             is WorkflowStep.Wait -> {
                 stepIndex++
-                handler.postDelayed({ executeNextStep() }, step.durationMs)
+                scheduleNextStep(step.durationMs)
             }
             is WorkflowStep.Tap -> dispatchStroke(
                 step.x, step.y, step.x, step.y, step.durationMs
@@ -106,7 +107,7 @@ class AutomationAccessibilityService : AccessibilityService() {
             override fun onCompleted(gestureDescription: GestureDescription?) {
                 if (!running) return
                 stepIndex++
-                handler.postDelayed({ executeNextStep() }, STEP_GAP_MS)
+                scheduleNextStep(STEP_GAP_MS)
             }
 
             override fun onCancelled(gestureDescription: GestureDescription?) {
@@ -117,11 +118,21 @@ class AutomationAccessibilityService : AccessibilityService() {
         if (!accepted) stopSequence()
     }
 
+    private fun scheduleNextStep(delayMs: Long) {
+        sequenceRunnable?.let(handler::removeCallbacks)
+        sequenceRunnable = Runnable {
+            sequenceRunnable = null
+            executeNextStep()
+        }
+        handler.postDelayed(sequenceRunnable!!, delayMs)
+    }
+
     private fun stopSequence() {
         running = false
         startRunnable?.let(handler::removeCallbacks)
         startRunnable = null
-        handler.removeCallbacksAndMessages(null)
+        sequenceRunnable?.let(handler::removeCallbacks)
+        sequenceRunnable = null
         steps = emptyList()
         stepIndex = 0
         repeatIndex = 0
@@ -309,6 +320,7 @@ class AutomationAccessibilityService : AccessibilityService() {
             if (workflow.isEmpty() || workflow.size > 50 || repeatCount !in 1..20) return false
 
             service.cancelPointPicker()
+            service.cancelOcrCapture()
             service.stopSequence()
             service.steps = workflow.toList()
             service.stepIndex = 0
@@ -349,6 +361,7 @@ class AutomationAccessibilityService : AccessibilityService() {
             val service = instance ?: return false
             if (target !in setOf("tap", "swipe_start", "swipe_end")) return false
             service.cancelPointPicker()
+            service.cancelOcrCapture()
             service.stopSequence()
             service.pointPickerTarget = target
             Toast.makeText(
