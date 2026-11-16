@@ -93,6 +93,7 @@ class MainActivity : Activity() {
 
         root.addView(button("Save workflow on this device") { saveProfile() }, matchWidth())
         root.addView(button("Load workflow") { loadProfile() }, matchWidth())
+        root.addView(button("Saved workflow library") { manageSavedWorkflows() }, matchWidth())
         root.addView(button("Export workflow file") { exportWorkflow() }, matchWidth())
         root.addView(button("Import workflow file") { importWorkflow() }, matchWidth())
         root.addView(button("Open Accessibility settings") {
@@ -266,6 +267,53 @@ class MainActivity : Activity() {
         }
         replaceSteps(decoded)
         status.text = "Workflow loaded: $name"
+    }
+
+
+    private fun manageSavedWorkflows() {
+        val names = preferences.all.keys
+            .filter { it.startsWith("workflow.") }
+            .map { it.removePrefix("workflow.") }
+            .filter { it.isNotBlank() }
+            .sorted()
+
+        if (names.isEmpty()) {
+            status.text = "No saved workflows on this device yet."
+            return
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle("Saved workflows (${names.size})")
+            .setItems(names.toTypedArray()) { _, index ->
+                val selected = names[index]
+                AlertDialog.Builder(this)
+                    .setTitle(selected)
+                    .setItems(arrayOf("Load", "Delete")) { _, action ->
+                        when (action) {
+                            0 -> {
+                                profileInput.setText(selected)
+                                loadProfile()
+                            }
+                            1 -> confirmDeleteWorkflow(selected)
+                        }
+                    }
+                    .setNegativeButton("Cancel", null)
+                    .show()
+            }
+            .setNegativeButton("Close", null)
+            .show()
+    }
+
+    private fun confirmDeleteWorkflow(name: String) {
+        AlertDialog.Builder(this)
+            .setTitle("Delete saved workflow?")
+            .setMessage("Delete '$name' from this device? This does not affect exported files.")
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Delete") { _, _ ->
+                preferences.edit().remove("workflow.$name").apply()
+                status.text = "Deleted saved workflow: $name"
+            }
+            .show()
     }
 
     private fun exportWorkflow() {
