@@ -10,10 +10,10 @@ import android.view.accessibility.AccessibilityEvent
 class AutomationAccessibilityService : AccessibilityService() {
     private val handler = Handler(Looper.getMainLooper())
     private var running = false
-    private var tapsRemaining = 0
-    private var tapX = 0f
-    private var tapY = 0f
-    private var intervalMs = 1500L
+    private var steps: List<WorkflowStep> = emptyList()
+    private var stepIndex = 0
+    private var repeatLimit = 1
+    private var repeatIndex = 0
     private var startRunnable: Runnable? = null
 
     override fun onServiceConnected() {
@@ -33,26 +33,57 @@ class AutomationAccessibilityService : AccessibilityService() {
         super.onDestroy()
     }
 
-    private fun scheduleTap() {
-        if (!running || tapsRemaining <= 0) {
-            stopSequence()
+    private fun executeNextStep() {
+        if (!running) return
+        if (stepIndex >= steps.size) {
+            repeatIndex++
+            if (repeatIndex >= repeatLimit) {
+                stopSequence()
+                return
+            }
+            stepIndex = 0
+            handler.postDelayed({ executeNextStep() }, STEP_GAP_MS)
             return
         }
 
-        val path = Path().apply { moveTo(tapX, tapY) }
+        when (val step = steps[stepIndex]) {
+            is WorkflowStep.Wait -> {
+                stepIndex++
+                handler.postDelayed({ executeNextStep() }, step.durationMs)
+            }
+            is WorkflowStep.Tap -> dispatchStroke(
+                step.x, step.y, step.x, step.y, step.durationMs
+            )
+            is WorkflowStep.Swipe -> dispatchStroke(
+                step.startX, step.startY, step.endX, step.endY, step.durationMs
+            )
+        }
+    }
+
+    private fun dispatchStroke(
+        startX: Float,
+        startY: Float,
+        endX: Float,
+        endY: Float,
+        durationMs: Long
+    ) {
+        val path = Path().apply {
+            moveTo(startX, startY)
+            lineTo(endX, endY)
+        }
         val gesture = GestureDescription.Builder()
-            .addStroke(GestureDescription.StrokeDescription(path, 0, 60))
+            .addStroke(
+                GestureDescription.StrokeDescription(
+                    path, 0, durationMs.coerceIn(50L, 10_000L)
+                )
+            )
             .build()
 
         val accepted = dispatchGesture(gesture, object : GestureResultCallback() {
             override fun onCompleted(gestureDescription: GestureDescription?) {
                 if (!running) return
-                tapsRemaining--
-                if (tapsRemaining <= 0) {
-                    stopSequence()
-                } else {
-                    handler.postDelayed({ scheduleTap() }, intervalMs)
-                }
+                stepIndex++
+                handler.postDelayed({ executeNextStep() }, STEP_GAP_MS)
             }
 
             override fun onCancelled(gestureDescription: GestureDescription?) {
@@ -68,27 +99,32 @@ class AutomationAccessibilityService : AccessibilityService() {
         startRunnable?.let(handler::removeCallbacks)
         startRunnable = null
         handler.removeCallbacksAndMessages(null)
-        tapsRemaining = 0
+        steps = emptyList()
+        stepIndex = 0
+        repeatIndex = 0
     }
 
     companion object {
         private const val START_DELAY_MS = 5_000L
+        private const val STEP_GAP_MS = 250L
 
         @Volatile private var instance: AutomationAccessibilityService? = null
 
         fun isConnected(): Boolean = instance != null
 
-        fun start(x: Float, y: Float, interval: Long, count: Int): Boolean {
+        fun start(workflow: List<WorkflowStep>, repeatCount: Int): Boolean {
             val service = instance ?: return false
+            if (workflow.isEmpty() || workflow.size > 50 || repeatCount !in 1..20) return false
+
             service.stopSequence()
-            service.tapX = x
-            service.tapY = y
-            service.intervalMs = interval.coerceAtLeast(500L)
-            service.tapsRemaining = count.coerceIn(1, 1000)
+            service.steps = workflow.toList()
+            service.stepIndex = 0
+            service.repeatLimit = repeatCount
+            service.repeatIndex = 0
             service.running = true
             service.startRunnable = Runnable {
                 service.startRunnable = null
-                if (service.running) service.scheduleTap()
+                if (service.running) service.executeNextStep()
             }
             service.handler.postDelayed(service.startRunnable!!, START_DELAY_MS)
             return true
