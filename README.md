@@ -39,6 +39,7 @@ This remains an early development build. The current visual recovery module anal
 ## Platform target
 
 - Initial target: Oppo Reno6 Z 5G, Android 13 / ColorOS.
+- Native ABI packaged for the target device: `arm64-v8a` (emulator/x86 builds are intentionally excluded from this device-specific APK).
 - Minimum Android version: Android 8.0 (API 26).
 - No root requirement.
 - A computer is not required to use an installed APK.
