@@ -534,17 +534,93 @@ class MainActivity : Activity() {
         val store = getSharedPreferences("gemini_visual_result", MODE_PRIVATE)
         if (!store.getBoolean("ready", false)) return
         val result = store.getString("result", "No analysis available").orEmpty()
+        val screenWidth = store.getInt("screen_width", 0)
+        val screenHeight = store.getInt("screen_height", 0)
         store.edit().clear().apply()
+        val candidates = try {
+            val root = org.json.JSONObject(result)
+            val array = root.optJSONArray("template_candidates") ?: org.json.JSONArray()
+            (0 until minOf(array.length(), 5)).mapNotNull { index ->
+                val item = array.optJSONObject(index) ?: return@mapNotNull null
+                val bounds = item.optJSONArray("bounds") ?: return@mapNotNull null
+                if (bounds.length() != 4) return@mapNotNull null
+                val values = (0..3).map { bounds.optInt(it, -1) }
+                if (values.any { it !in 0..1000 } ||
+                    values[2] - values[0] < 8 || values[3] - values[1] < 8
+                ) return@mapNotNull null
+                item
+            }
+        } catch (_: Exception) { emptyList() }
         val view = TextView(this).apply {
             text = result
             textSize = 15f
             setTextIsSelectable(true)
             setPadding(20, 16, 20, 16)
         }
-        AlertDialog.Builder(this)
+        val dialog = AlertDialog.Builder(this)
             .setTitle("Gemini visual analysis")
             .setView(ScrollView(this).apply { addView(view) })
             .setPositiveButton("Close", null)
+        if (candidates.isNotEmpty() && screenWidth > 0 && screenHeight > 0) {
+            dialog.setNeutralButton("Review template suggestions") { _, _ ->
+                reviewTemplateCandidates(candidates, screenWidth, screenHeight)
+            }
+        }
+        dialog.show()
+    }
+
+    private fun reviewTemplateCandidates(
+        candidates: List<org.json.JSONObject>,
+        screenWidth: Int,
+        screenHeight: Int
+    ) {
+        val labels = candidates.mapIndexed { index, item ->
+            "${index + 1}. ${item.optString("label", "Visible UI element").take(60)}"
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Choose a template to learn")
+            .setMessage("Gemini only suggests approximate image regions. Select one to review its crop; nothing is saved until you confirm.")
+            .setItems(labels.toTypedArray()) { _, selected ->
+                val item = candidates[selected]
+                val bounds = item.optJSONArray("bounds") ?: return@setItems
+                val left = (bounds.optInt(0) * screenWidth / 1000f).toInt().coerceIn(0, screenWidth)
+                val top = (bounds.optInt(1) * screenHeight / 1000f).toInt().coerceIn(0, screenHeight)
+                val right = (bounds.optInt(2) * screenWidth / 1000f).toInt().coerceIn(0, screenWidth)
+                val bottom = (bounds.optInt(3) * screenHeight / 1000f).toInt().coerceIn(0, screenHeight)
+                if (right - left < 8 || bottom - top < 8) {
+                    status.text = "Suggested crop is too small. Select the region manually instead."
+                    return@setItems
+                }
+                val nameInput = EditText(this).apply {
+                    hint = "Local template name"
+                    setSingleLine(true)
+                    setText(item.optString("label", "learned_template")
+                        .replace(Regex("[^A-Za-z0-9_-]"), "_").take(40))
+                }
+                AlertDialog.Builder(this)
+                    .setTitle("Confirm local template")
+                    .setMessage(
+                        "Suggested region: left $left, top $top, right $right, bottom $bottom. " +
+                            "Return to the same screen before capture. The crop is stored only on this device and is not uploaded."
+                    )
+                    .setView(nameInput)
+                    .setNegativeButton("Cancel", null)
+                    .setPositiveButton("Capture and save") { _, _ ->
+                        val name = nameInput.text.toString().trim()
+                        if (!name.matches(Regex("[A-Za-z0-9_-]{1,40}"))) {
+                            status.text = "Use 1–40 letters, numbers, underscores or hyphens for the template name."
+                        } else if (AutomationAccessibilityService.armTemplateLearning(
+                                name, left, top, right, bottom
+                            )
+                        ) {
+                            status.text = "Template suggestion accepted. Return to the same screen; a local crop will be captured after 8 seconds."
+                        } else {
+                            status.text = "Accessibility service is not connected or the suggested crop is invalid."
+                        }
+                    }
+                    .show()
+            }
+            .setNegativeButton("Cancel", null)
             .show()
     }
 
