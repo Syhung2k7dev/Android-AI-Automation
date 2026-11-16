@@ -92,7 +92,6 @@ object GeminiCloudClient {
         var lastError: Exception? = null
         for (attempt in 0 until MAX_ATTEMPTS) {
             try {
-                val reply = request(apiKey, prompt, image, forceJson)
                 val requestNow = System.currentTimeMillis()
                 val oldTimes = try { JSONArray(prefs.getString("request_times", "[]")) } catch (_: Exception) { JSONArray() }
                 val recentTimes = JSONArray()
@@ -102,10 +101,13 @@ object GeminiCloudClient {
                 }
                 recentTimes.put(requestNow)
                 prefs.edit()
-                    .putInt("failures", 0)
-                    .putLong("open_until", 0L)
                     .putLong("requests", prefs.getLong("requests", 0L) + 1L)
                     .putString("request_times", recentTimes.toString())
+                    .apply()
+                val reply = request(apiKey, prompt, image, forceJson)
+                prefs.edit()
+                    .putInt("failures", 0)
+                    .putLong("open_until", 0L)
                     .putLong("input_tokens", prefs.getLong("input_tokens", 0L) + reply.promptTokens)
                     .putLong("output_tokens", prefs.getLong("output_tokens", 0L) + reply.outputTokens)
                     .putLong("total_tokens", prefs.getLong("total_tokens", 0L) + reply.totalTokens)
