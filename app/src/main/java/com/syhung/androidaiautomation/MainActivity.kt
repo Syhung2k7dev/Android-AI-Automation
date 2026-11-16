@@ -9,6 +9,7 @@ import android.provider.Settings
 import android.view.Gravity
 import android.view.ViewGroup
 import android.widget.Button
+import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -377,7 +378,7 @@ class MainActivity : Activity() {
             alarm.cancel(pending)
             pending.cancel()
             getSharedPreferences("scheduler_state", MODE_PRIVATE).edit().clear().apply()
-            status.text = "Scheduled cooldown reminder cancelled."
+            status.text = "Scheduled reminder cancelled."
         } else {
             status.text = "There is no pending cooldown reminder."
         }
@@ -556,43 +557,76 @@ class MainActivity : Activity() {
             return
         }
         val input = EditText(this).apply {
-            hint = "Minutes from now (1–1440)"
+            hint = "Minutes from now / repeat interval"
             setSingleLine(true)
             setText("30")
             inputType = InputType.TYPE_CLASS_NUMBER
         }
+        val recurring = CheckBox(this).apply {
+            text = "Repeat reminder (minimum 15 minutes, maximum 7 days)"
+            isChecked = false
+        }
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(24, 8, 24, 0)
+            addView(input, matchWidth())
+            addView(recurring, matchWidth())
+        }
         AlertDialog.Builder(this)
-            .setTitle("Schedule a cooldown reminder")
-            .setMessage("Schedule a reminder for a saved profile. The device may delay this inexact alarm to save power. When it arrives, the app asks you to review the workflow; it never starts automatically.")
-            .setView(input)
+            .setTitle("Schedule profile reminder")
+            .setMessage("A reminder never starts automation. When it arrives, review the saved profile and explicitly confirm any run. Repeating reminders are inexact and may be delayed by Android battery management.")
+            .setView(content)
             .setNegativeButton("Cancel", null)
             .setPositiveButton("Schedule") { _, _ ->
-                val minutes = input.text.toString().toLongOrNull()?.takeIf { it in 1L..1440L }
+                val minutes = input.text.toString().toLongOrNull()
+                val isRecurring = recurring.isChecked
+                val validMinutes = if (isRecurring) minutes in 15L..10_080L else minutes in 1L..1_440L
                 val profileName = profileInput.text.toString().trim()
-                if (minutes == null || profileName.isBlank() ||
+                if (!validMinutes || profileName.isBlank() ||
                     preferences.getString("workflow.$profileName", null) == null
                 ) {
-                    status.text = "Enter 1–1440 minutes and the exact name of an existing saved profile."
-                } else {
-                    val alarm = getSystemService(ALARM_SERVICE) as android.app.AlarmManager
-                    val intent = Intent(this, SchedulerReceiver::class.java)
-                        .putExtra("profile_name", profileName)
-                    val pending = android.app.PendingIntent.getBroadcast(
-                        this, SCHEDULER_REQUEST,
-                        intent,
-                        android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
+                    status.text = if (isRecurring) {
+                        "Enter a 15–10080 minute interval and an existing saved profile name."
+                    } else {
+                        "Enter 1–1440 minutes and the exact name of an existing saved profile."
+                    }
+                    return@setPositiveButton
+                }
+                val alarm = getSystemService(ALARM_SERVICE) as android.app.AlarmManager
+                val intent = Intent(this, SchedulerReceiver::class.java)
+                    .putExtra("profile_name", profileName)
+                    .putExtra("recurring", isRecurring)
+                val pending = android.app.PendingIntent.getBroadcast(
+                    this, SCHEDULER_REQUEST, intent,
+                    android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
+                )
+                val triggerAt = System.currentTimeMillis() + minutes!! * 60_000L
+                val state = getSharedPreferences("scheduler_state", MODE_PRIVATE)
+                state.edit()
+                    .putBoolean("enabled", true)
+                    .putBoolean("recurring", isRecurring)
+                    .putLong("interval_minutes", if (isRecurring) minutes else 0L)
+                    .putString("profile_name", profileName)
+                    .putLong("trigger_at", triggerAt)
+                    .apply()
+                if (isRecurring) {
+                    alarm.setInexactRepeating(
+                        android.app.AlarmManager.RTC_WAKEUP,
+                        triggerAt,
+                        minutes * 60_000L,
+                        pending
                     )
-                    val triggerAt = System.currentTimeMillis() + minutes * 60_000L
-                    getSharedPreferences("scheduler_state", MODE_PRIVATE).edit()
-                        .putString("profile_name", profileName)
-                        .putLong("trigger_at", triggerAt)
-                        .apply()
+                } else {
                     alarm.setAndAllowWhileIdle(
                         android.app.AlarmManager.RTC_WAKEUP,
                         triggerAt,
                         pending
                     )
-                    status.text = "Reminder scheduled for profile '$profileName' in about $minutes minutes. Automation will require your confirmation."
+                }
+                status.text = if (isRecurring) {
+                    "Repeating reminder set every $minutes minutes for '$profileName'. It will be restored after reboot."
+                } else {
+                    "One-shot reminder scheduled for '$profileName' in about $minutes minutes."
                 }
             }
             .show()
