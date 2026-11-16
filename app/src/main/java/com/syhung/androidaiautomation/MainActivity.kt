@@ -81,6 +81,7 @@ class MainActivity : Activity() {
         root.addView(button("Add wait-for-text condition") { addWaitForText() }, matchWidth())
         root.addView(button("Import image template") { importImageTemplate() }, matchWidth())
         root.addView(button("Add wait-for-image condition") { addWaitForImage() }, matchWidth())
+        root.addView(button("Manage image templates") { manageImageTemplates() }, matchWidth())
         root.addView(button("Manage / reorder steps") { manageStep() }, matchWidth())
         root.addView(button("Clear workflow") {
             if (steps.isNotEmpty()) {
@@ -592,6 +593,41 @@ class MainActivity : Activity() {
         } catch (error: Exception) {
             status.text = "Image template import failed: ${error.localizedMessage ?: "invalid image"}"
         }
+    }
+
+    private fun manageImageTemplates() {
+        val names = TemplateStore.names(this)
+        if (names.isEmpty()) {
+            status.text = "No image templates saved yet."
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Local image templates")
+            .setItems(names.toTypedArray()) { _, index ->
+                val name = names[index]
+                AlertDialog.Builder(this)
+                    .setTitle(name)
+                    .setItems(arrayOf("Use for image condition", "Delete template")) { _, action ->
+                        when (action) {
+                            0 -> {
+                                templateInput.setText(name)
+                                status.text = "Selected image template: $name"
+                            }
+                            1 -> AlertDialog.Builder(this)
+                                .setMessage("Delete local image template '$name'? Existing workflows using it will stop if the template is missing.")
+                                .setNegativeButton("Cancel", null)
+                                .setPositiveButton("Delete") { _, _ ->
+                                    TemplateStore.delete(this, name)
+                                    status.text = "Deleted image template: $name"
+                                }
+                                .show()
+                        }
+                    }
+                    .setNegativeButton("Close", null)
+                    .show()
+            }
+            .setNegativeButton("Close", null)
+            .show()
     }
 
     private fun addWaitForImage() {
