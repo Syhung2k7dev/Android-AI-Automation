@@ -136,7 +136,7 @@ class AutomationAccessibilityService : AccessibilityService() {
     }
 
     private fun captureForTextCondition(condition: WorkflowStep.WaitForText) {
-        if (!running || conditionCaptureInFlight) return
+        if (!running || paused || conditionCaptureInFlight) return
         if (SystemClock.elapsedRealtime() >= conditionDeadline) {
             stopSequence()
             Toast.makeText(this, "Text condition timed out. Workflow stopped.", Toast.LENGTH_LONG).show()
@@ -166,7 +166,7 @@ class AutomationAccessibilityService : AccessibilityService() {
                     val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
                     recognizer.process(InputImage.fromBitmap(bitmap, 0))
                         .addOnSuccessListener { result ->
-                            if (!running || captureGeneration != workflowGeneration) return@addOnSuccessListener
+                            if (!running || paused || captureGeneration != workflowGeneration) return@addOnSuccessListener
                             conditionCaptureInFlight = false
                             if (SystemClock.elapsedRealtime() >= conditionDeadline) {
                                 stopSequence()
@@ -284,7 +284,7 @@ class AutomationAccessibilityService : AccessibilityService() {
                             template.recycle()
                         }
                         handler.post {
-                            if (!running || captureGeneration != workflowGeneration) return@post
+                            if (!running || paused || captureGeneration != workflowGeneration) return@post
                             conditionCaptureInFlight = false
                             if (SystemClock.elapsedRealtime() >= conditionDeadline) {
                                 stopSequence()
@@ -316,7 +316,7 @@ class AutomationAccessibilityService : AccessibilityService() {
     }
 
     private fun scheduleImagePoll(condition: WorkflowStep.WaitForImage) {
-        if (!running) return
+        if (!running || paused) return
         if (SystemClock.elapsedRealtime() >= conditionDeadline) {
             stopSequence()
             Toast.makeText(this, "Image condition timed out. Workflow stopped.", Toast.LENGTH_LONG).show()
