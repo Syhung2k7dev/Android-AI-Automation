@@ -2,6 +2,7 @@ package com.syhung.androidaiautomation.agent
 
 import android.app.Activity
 import android.graphics.BitmapFactory
+import android.graphics.Rect
 import android.app.AlertDialog
 import android.content.Intent
 import android.os.Bundle
@@ -56,6 +57,7 @@ class AgentDashboardActivity : Activity() {
         addButton(root, "Resource / upgrade calculator", ::resourceCalculator)
         addButton(root, "Validate and save CASL skill draft", ::createSkillDraft)
         addButton(root, "View skill registry", ::browseSkills)
+        addButton(root, "Create crop from a stored original", ::createVisionCrop)
         addButton(root, "Import image into Vision Memory", {
             startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
                 addCategory(Intent.CATEGORY_OPENABLE)
@@ -134,6 +136,27 @@ class AgentDashboardActivity : Activity() {
                 val id = domain.saveArmy(v[1].takeIf { it.isNotBlank() }, v[0], th, capacity, composition)
                 status.text = "Army record saved (unverified): " + id
             } catch (e: Exception) { status.text = e.message ?: "Invalid army record." }
+        }
+    }
+
+
+    private fun createVisionCrop() = inputDialog("Create linked Vision Memory crop", listOf(
+        "Original image ID" to "",
+        "Crop label" to "region",
+        "Left pixel" to "0",
+        "Top pixel" to "0",
+        "Right pixel" to "100",
+        "Bottom pixel" to "100"
+    )) { values ->
+        val coords = values.drop(2).map { it.toIntOrNull() }
+        if (values[0].isBlank() || values[1].isBlank() || coords.any { it == null }) {
+            status.text = "Enter an image ID, label and four integer coordinates."
+        } else try {
+            val bounds = Rect(coords[0]!!, coords[1]!!, coords[2]!!, coords[3]!!)
+            val asset = VisionMemoryStore(this, repository).saveCropFromOriginal(values[0], bounds, values[1])
+            status.text = "Crop saved and linked to original image: " + asset.id
+        } catch (e: Exception) {
+            status.text = e.localizedMessage ?: "Could not create image crop."
         }
     }
 
