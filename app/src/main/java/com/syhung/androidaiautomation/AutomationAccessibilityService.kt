@@ -118,12 +118,14 @@ class AutomationAccessibilityService : AccessibilityService() {
                 stepIndex++
                 scheduleNextStep(STEP_GAP_MS)
             }
-            is WorkflowStep.Tap -> dispatchStroke(
-                step.x, step.y, step.x, step.y, step.durationMs
-            )
-            is WorkflowStep.Swipe -> dispatchStroke(
-                step.startX, step.startY, step.endX, step.endY, step.durationMs
-            )
+            is WorkflowStep.Tap -> {
+                scheduleWatchdog()
+                dispatchStroke(step.x, step.y, step.x, step.y, step.durationMs)
+            }
+            is WorkflowStep.Swipe -> {
+                scheduleWatchdog()
+                dispatchStroke(step.startX, step.startY, step.endX, step.endY, step.durationMs)
+            }
         }
     }
 
@@ -628,7 +630,9 @@ class AutomationAccessibilityService : AccessibilityService() {
 
     private fun scheduleWatchdog() {
         watchdogRunnable?.let(handler::removeCallbacks)
-        if (!running || paused) return
+        if (!running || paused || stepIndex !in steps.indices ||
+            (steps[stepIndex] !is WorkflowStep.Tap && steps[stepIndex] !is WorkflowStep.Swipe)
+        ) return
         watchdogRunnable = Runnable {
             watchdogRunnable = null
             if (!running || paused) return@Runnable
