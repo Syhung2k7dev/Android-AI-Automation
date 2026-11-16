@@ -12,7 +12,7 @@ object CaslValidator {
         "ANALYZE_IMAGE", "GET_CROP", "GET_SCENE_MAP", "OCR_QUERY", "MATCH_TEMPLATE",
         "CALCULATE", "COMPARE", "VALIDATE", "PLAN_TASKS", "CALL_SKILL", "WRITE_MEMORY",
         "UPDATE_RECORD", "CREATE_TASK", "CREATE_REMINDER", "IF", "ELSE", "END_IF",
-        "LOOP", "WAIT", "OUTPUT", "ON_ERROR"
+        "LOOP", "END_LOOP", "WAIT", "OUTPUT", "ON_ERROR"
     )
     private val allowedCapabilities = setOf(
         "knowledge.read", "account.read", "account.update_user_fields", "layout.read",
@@ -25,10 +25,10 @@ object CaslValidator {
         val errors = mutableListOf<String>()
         val warnings = mutableListOf<String>()
         val manifest = try { JSONObject(manifestText) } catch (e: Exception) {
-            return CaslValidationResult(false, listOf("Manifest JSON is invalid: ${e.message}"), emptyList())
+            return CaslValidationResult(false, listOf("Manifest JSON is invalid: " + e.message), emptyList())
         }
         val workflow = try { JSONObject(workflowText) } catch (e: Exception) {
-            return CaslValidationResult(false, listOf("Workflow JSON is invalid: ${e.message}"), emptyList())
+            return CaslValidationResult(false, listOf("Workflow JSON is invalid: " + e.message), emptyList())
         }
         if (manifest.optString("skill_id").isBlank()) errors += "skill_id is required"
         if (manifest.optString("name").isBlank()) errors += "name is required"
@@ -36,42 +36,30 @@ object CaslValidator {
         val requested = manifest.optJSONArray("capabilities") ?: JSONArray()
         for (i in 0 until requested.length()) {
             val capability = requested.optString(i)
-            if (capability !in allowedCapabilities) errors += "Capability is not allowed: $capability"
+            if (capability !in allowedCapabilities) errors += "Capability is not allowed: " + capability
         }
-        val steps = workflow.optJSONArray("steps") ?: run {
-            errors += "workflow.steps must be an array"
-            JSONArray()
-        }
-        if (steps.length() == 0) errors += "workflow must contain at least one step"
-        if (steps.length() > 100) errors += "workflow exceeds 100 steps"
-        var depth = 0
+        val steps = workflow.optJSONArray("steps") ?: run { errors += "workflow.steps must be an array"; JSONArray() }
+        if (steps.length() !in 1..100) errors += "workflow must contain 1–100 steps"
         val ids = mutableSetOf<String>()
+        val stack = mutableListOf<Pair<String, Int>>()
+        val elseSeen = mutableSetOf<Int>()
         for (i in 0 until steps.length()) {
             val step = steps.optJSONObject(i)
-            if (step == null) { errors += "Step $i is not an object"; continue }
+            if (step == null) { errors += "Step " + i + " is not an object"; continue }
             val id = step.optString("id")
-            if (id.isBlank()) errors += "Step $i has no id"
-            else if (!ids.add(id)) errors += "Duplicate step id: $id"
+            if (id.isBlank()) errors += "Step " + i + " has no id" else if (!ids.add(id)) errors += "Duplicate step id: " + id
             val op = step.optString("op").uppercase()
-            if (op !in allowedOperations) errors += "Unknown operation at step $i: $op"
+            if (op !in allowedOperations) errors += "Unknown operation at step " + i + ": " + op
             when (op) {
-                "IF" -> depth++
-                "ELSE" -> if (depth == 0) errors += "ELSE without IF at step $i"
-                "END_IF" -> {
-                    depth--
-                    if (depth < 0) { errors += "END_IF without IF at step $i"; depth = 0 }
-                }
-                "LOOP" -> {
-                    val max = step.optInt("max_iterations", 0)
-                    if (max !in 1..20) errors += "LOOP at step $i requires max_iterations from 1 to 20"
-                }
-                "WAIT" -> {
-                    val ms = step.optLong("duration_ms", 0)
-                    if (ms !in 0..30000) errors += "WAIT at step $i exceeds the allowed duration"
-                }
+                "IF" -> stack.add("IF" to i)
+                "ELSE" -> { val top = stack.lastOrNull(); if (top?.first != "IF" || !elseSeen.add(top.second)) errors += "ELSE without matching IF or duplicate ELSE at step " + i }
+                "END_IF" -> if (stack.removeLastOrNull()?.first != "IF") errors += "END_IF without IF at step " + i
+                "LOOP" -> { val count = step.optInt("count", 0); if (count !in 1..20) errors += "LOOP at step " + i + " requires count from 1 to 20"; stack.add("LOOP" to i) }
+                "END_LOOP" -> if (stack.removeLastOrNull()?.first != "LOOP") errors += "END_LOOP without LOOP at step " + i
+                "WAIT" -> { val ms = step.optLong("duration_ms", -1); if (ms !in 0..30000) errors += "WAIT at step " + i + " must be 0–30000 ms" }
             }
         }
-        if (depth != 0) errors += "Unclosed IF block"
+        if (stack.isNotEmpty()) errors += "Unclosed " + stack.last().first + " block"
         if (workflow.optInt("version", 0) != 1) errors += "Unsupported CASL workflow version"
         if (manifest.optString("status", "draft") == "active") warnings += "Active status is ignored until explicit user approval"
         return CaslValidationResult(errors.isEmpty(), errors, warnings)
