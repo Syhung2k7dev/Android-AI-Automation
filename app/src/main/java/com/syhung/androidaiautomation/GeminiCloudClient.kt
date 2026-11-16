@@ -172,7 +172,7 @@ object GeminiCloudClient {
             }
             val generationConfig = JSONObject()
                 .put("temperature", 0.1)
-                .put("maxOutputTokens", if (image != null) 512 else 128)
+                .put("maxOutputTokens", when { image != null -> 512; forceJson -> 2048; else -> 128 })
             if (forceJson) generationConfig.put("responseMimeType", "application/json")
             val body = JSONObject()
                 .put("contents", org.json.JSONArray().put(
