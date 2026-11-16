@@ -99,6 +99,11 @@ class MainActivity : Activity() {
         root.addView(button("Saved workflow library") { manageSavedWorkflows() }, matchWidth())
         root.addView(button("Export workflow file") { exportWorkflow() }, matchWidth())
         root.addView(button("Import workflow file") { importWorkflow() }, matchWidth())
+        root.addView(button("Read screen text offline") { confirmOcrCapture() }, matchWidth())
+        root.addView(button("Clear OCR result") {
+            getSharedPreferences("ocr_results", MODE_PRIVATE).edit().clear().apply()
+            status.text = "Stored OCR result cleared."
+        }, matchWidth())
         root.addView(button("Open Accessibility settings") {
             startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
         }, matchWidth())
@@ -109,7 +114,7 @@ class MainActivity : Activity() {
         }, matchWidth())
 
         root.addView(TextView(this).apply {
-            text = "Local workflow editor: create, reorder, save, import and export tap, swipe and wait steps. Use visual point selection to capture coordinates from an authorized screen. The picker opens after a 10-second switch window and temporarily intercepts one tap to record its position. Workflows stay on this device unless you explicitly export a file. Each run requires confirmation and has a 5-second countdown. Limit: 50 steps and 20 repeats. This build does not read screen contents, use OCR, capture the screen or connect to a cloud AI service."
+            text = "Local workflow editor: create, reorder, save, import and export tap, swipe and wait steps. Use visual point selection to capture coordinates from an authorized screen. The picker opens after a 10-second switch window and temporarily intercepts one tap to record its position. Workflows stay on this device unless you explicitly export a file. Each run requires confirmation and has a 5-second countdown. Limit: 50 steps and 20 repeats. Screen text recognition is available only after a separate confirmation; it captures one screenshot and processes it locally with a bundled model. No cloud AI service is used."
             textSize = 13f
             setPadding(0, 18, 0, 0)
         }, matchWidth())
@@ -122,8 +127,49 @@ class MainActivity : Activity() {
         super.onResume()
         if (::status.isInitialized) {
             applyPickedPoint()
+            showPendingOcrResult()
             refreshStatus()
         }
+    }
+
+
+    private fun confirmOcrCapture() {
+        AlertDialog.Builder(this)
+            .setTitle("Read text from another screen?")
+            .setMessage(
+                "The app will capture one screenshot after an 8-second switch window. " +
+                    "The image is processed on this device using the bundled offline text-recognition model. " +
+                    "The screenshot is not saved or uploaded; recognized text is temporarily stored locally until you view or clear it. " +
+                    "Do not use this on private or sensitive screens."
+            )
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Continue") { _, _ ->
+                if (AutomationAccessibilityService.armOcrCapture()) {
+                    status.text = "Switch to the screen to read within 8 seconds."
+                } else {
+                    status.text = "Enable the app's Accessibility service before using OCR."
+                }
+            }
+            .show()
+    }
+
+    private fun showPendingOcrResult() {
+        val resultStore = getSharedPreferences("ocr_results", MODE_PRIVATE)
+        if (!resultStore.getBoolean("ready", false)) return
+        val result = resultStore.getString("result", "No result available").orEmpty()
+        resultStore.edit().clear().apply()
+
+        val resultView = TextView(this).apply {
+            text = result
+            textSize = 15f
+            setTextIsSelectable(true)
+            setPadding(20, 16, 20, 16)
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Offline OCR result")
+            .setView(ScrollView(this).apply { addView(resultView) })
+            .setPositiveButton("Close", null)
+            .show()
     }
 
     private fun armPointSelection(target: String) {

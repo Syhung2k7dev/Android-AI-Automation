@@ -2,11 +2,13 @@ package com.syhung.androidaiautomation
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
+import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.Path
 import android.graphics.PixelFormat
 import android.os.Handler
 import android.os.Looper
+import android.view.Display
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
@@ -16,6 +18,9 @@ import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.TextView
 import android.widget.Toast
+import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.text.TextRecognition
+import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 
 class AutomationAccessibilityService : AccessibilityService() {
     private val handler = Handler(Looper.getMainLooper())
@@ -28,6 +33,7 @@ class AutomationAccessibilityService : AccessibilityService() {
     private var pointPickerRunnable: Runnable? = null
     private var pointPickerView: View? = null
     private var pointPickerTarget: String? = null
+    private var ocrCaptureRunnable: Runnable? = null
 
     override fun onServiceConnected() {
         super.onServiceConnected()
@@ -39,11 +45,13 @@ class AutomationAccessibilityService : AccessibilityService() {
     override fun onInterrupt() {
         stopSequence()
         cancelPointPicker()
+        cancelOcrCapture()
     }
 
     override fun onDestroy() {
         stopSequence()
         cancelPointPicker()
+        cancelOcrCapture()
         if (instance === this) instance = null
         super.onDestroy()
     }
@@ -117,6 +125,70 @@ class AutomationAccessibilityService : AccessibilityService() {
         steps = emptyList()
         stepIndex = 0
         repeatIndex = 0
+    }
+
+
+    private fun captureScreenForOcr() {
+        ocrCaptureRunnable = null
+        try {
+            takeScreenshot(Display.DEFAULT_DISPLAY, mainExecutor, object : TakeScreenshotCallback() {
+                override fun onSuccess(screenshot: ScreenshotResult) {
+                    val hardwareBuffer = screenshot.hardwareBuffer
+                    val bitmap = try {
+                        Bitmap.wrapHardwareBuffer(hardwareBuffer, screenshot.colorSpace)
+                            ?.copy(Bitmap.Config.ARGB_8888, false)
+                    } catch (_: Exception) {
+                        null
+                    } finally {
+                        hardwareBuffer.close()
+                    }
+
+                    if (bitmap == null) {
+                        saveOcrResult("Unable to prepare the screenshot on this device.")
+                        return
+                    }
+
+                    val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+                    recognizer.process(InputImage.fromBitmap(bitmap, 0))
+                        .addOnSuccessListener { result ->
+                            val recognized = result.text.trim()
+                            saveOcrResult(
+                                if (recognized.isEmpty()) "No readable text was found on the captured screen."
+                                else recognized
+                            )
+                        }
+                        .addOnFailureListener { error ->
+                            saveOcrResult("Text recognition failed: ${error.localizedMessage ?: "unknown error"}")
+                        }
+                        .addOnCompleteListener {
+                            bitmap.recycle()
+                            recognizer.close()
+                        }
+                }
+
+                override fun onFailure(errorCode: Int) {
+                    saveOcrResult(
+                        "Screen capture was blocked or unavailable (error $errorCode). " +
+                            "Some secure or protected screens cannot be captured."
+                    )
+                }
+            })
+        } catch (error: Exception) {
+            saveOcrResult("Screen capture failed: ${error.localizedMessage ?: "unknown error"}")
+        }
+    }
+
+    private fun saveOcrResult(text: String) {
+        getSharedPreferences(OCR_PREFS, MODE_PRIVATE).edit()
+            .putString("result", text.take(MAX_OCR_RESULT_CHARS))
+            .putBoolean("ready", true)
+            .apply()
+        Toast.makeText(this, "Offline OCR finished. Return to Android AI Automation to view the result.", Toast.LENGTH_LONG).show()
+    }
+
+    private fun cancelOcrCapture() {
+        ocrCaptureRunnable?.let(handler::removeCallbacks)
+        ocrCaptureRunnable = null
     }
 
     private fun showPointPicker() {
@@ -224,6 +296,9 @@ class AutomationAccessibilityService : AccessibilityService() {
         private const val STEP_GAP_MS = 250L
         private const val POINT_PICKER_DELAY_MS = 10_000L
         private const val POINT_PICKER_PREFS = "point_picker"
+        private const val OCR_PREFS = "ocr_results"
+        private const val OCR_CAPTURE_DELAY_MS = 8_000L
+        private const val MAX_OCR_RESULT_CHARS = 30_000
 
         @Volatile private var instance: AutomationAccessibilityService? = null
 
@@ -248,6 +323,28 @@ class AutomationAccessibilityService : AccessibilityService() {
             return true
         }
 
+        fun armOcrCapture(): Boolean {
+            val service = instance ?: return false
+            service.cancelPointPicker()
+            service.cancelOcrCapture()
+            service.stopSequence()
+            service.getSharedPreferences(OCR_PREFS, MODE_PRIVATE).edit()
+                .remove("result")
+                .putBoolean("ready", false)
+                .apply()
+            Toast.makeText(
+                service,
+                "Switch to the screen you want to read. A single screenshot will be captured in 8 seconds and processed on this device.",
+                Toast.LENGTH_LONG
+            ).show()
+            service.ocrCaptureRunnable = Runnable {
+                service.ocrCaptureRunnable = null
+                service.captureScreenForOcr()
+            }
+            service.handler.postDelayed(service.ocrCaptureRunnable!!, OCR_CAPTURE_DELAY_MS)
+            return true
+        }
+
         fun armPointPicker(target: String): Boolean {
             val service = instance ?: return false
             if (target !in setOf("tap", "swipe_start", "swipe_end")) return false
@@ -268,6 +365,7 @@ class AutomationAccessibilityService : AccessibilityService() {
             instance?.let {
                 it.stopSequence()
                 it.cancelPointPicker()
+                it.cancelOcrCapture()
             }
         }
     }
