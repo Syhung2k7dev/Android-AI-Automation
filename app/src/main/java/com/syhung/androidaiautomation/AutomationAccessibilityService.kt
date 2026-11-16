@@ -39,6 +39,7 @@ class AutomationAccessibilityService : AccessibilityService() {
     private var conditionPollRunnable: Runnable? = null
     private var conditionDeadline = 0L
     private var conditionCaptureInFlight = false
+    private var workflowGeneration = 0L
 
     override fun onServiceConnected() {
         super.onServiceConnected()
@@ -103,6 +104,7 @@ class AutomationAccessibilityService : AccessibilityService() {
             return
         }
         conditionCaptureInFlight = true
+        val captureGeneration = workflowGeneration
         try {
             takeScreenshot(Display.DEFAULT_DISPLAY, mainExecutor, object : TakeScreenshotCallback {
                 override fun onSuccess(screenshot: ScreenshotResult) {
@@ -124,9 +126,12 @@ class AutomationAccessibilityService : AccessibilityService() {
                     val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
                     recognizer.process(InputImage.fromBitmap(bitmap, 0))
                         .addOnSuccessListener { result ->
-                            if (!running) return@addOnSuccessListener
+                            if (!running || captureGeneration != workflowGeneration) return@addOnSuccessListener
                             conditionCaptureInFlight = false
-                            if (result.text.contains(condition.text, ignoreCase = true)) {
+                            if (SystemClock.elapsedRealtime() >= conditionDeadline) {
+                                stopSequence()
+                                Toast.makeText(this@AutomationAccessibilityService, "Text condition timed out. Workflow stopped.", Toast.LENGTH_LONG).show()
+                            } else if (result.text.contains(condition.text, ignoreCase = true)) {
                                 stepIndex++
                                 conditionPollRunnable?.let(handler::removeCallbacks)
                                 conditionPollRunnable = null
@@ -136,6 +141,7 @@ class AutomationAccessibilityService : AccessibilityService() {
                             }
                         }
                         .addOnFailureListener {
+                            if (!running || captureGeneration != workflowGeneration) return@addOnFailureListener
                             conditionCaptureInFlight = false
                             if (running) {
                                 stopSequence()
@@ -149,6 +155,7 @@ class AutomationAccessibilityService : AccessibilityService() {
                 }
 
                 override fun onFailure(errorCode: Int) {
+                    if (!running || captureGeneration != workflowGeneration) return
                     conditionCaptureInFlight = false
                     if (running) {
                         stopSequence()
@@ -222,6 +229,7 @@ class AutomationAccessibilityService : AccessibilityService() {
     }
 
     private fun stopSequence() {
+        workflowGeneration++
         running = false
         startRunnable?.let(handler::removeCallbacks)
         startRunnable = null
