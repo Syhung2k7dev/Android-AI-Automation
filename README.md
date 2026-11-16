@@ -21,7 +21,7 @@ An independent Android automation prototype built around explicit user control a
 - Current workflow limits: 50 steps and 20 repeats.
 - OCR condition defaults: 30-second timeout, 2-second polling interval; both are bounded to avoid indefinite capture loops.
 
-This remains an early development build, not the complete product. OCR and basic local image conditions are implemented as bounded wait steps; branching, scheduling, and multi-account queue execution are not yet implemented.
+This remains an early development build, not the complete product. OCR and basic local image conditions are implemented as bounded wait steps; branching, persistent scheduled timers, and a dedicated foreground dashboard are not yet implemented. The current queue runs saved workflows sequentially only while the Accessibility Service remains connected.
 
 ## Not implemented
 
@@ -29,7 +29,8 @@ This remains an early development build, not the complete product. OCR and basic
 - OCR branching beyond the current wait-until-text-appears step.
 - Scheduling and foreground execution controls.
 - Screenshot-based Gemini recovery and structured workflow mutation are not yet implemented; the current cloud integration is a text-only connection foundation.
-- Multi-account workflow management.
+- Sequential queue execution for up to 20 saved workflow profiles after explicit confirmation.
+- Persistent scheduled cooldown timers and a dedicated foreground dashboard.
 - Production release signing and distribution review.
 
 ## Platform target
