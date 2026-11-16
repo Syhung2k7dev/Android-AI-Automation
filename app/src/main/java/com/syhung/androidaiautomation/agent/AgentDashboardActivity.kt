@@ -13,6 +13,9 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import com.syhung.androidaiautomation.agent.backup.CadssBackupManager
+import com.syhung.androidaiautomation.CloudKeyStore
+import com.syhung.androidaiautomation.GeminiCloudClient
+import com.syhung.androidaiautomation.agent.data.CadssRecord
 import com.syhung.androidaiautomation.agent.casl.CaslValidator
 import com.syhung.androidaiautomation.agent.casl.SkillRegistry
 import com.syhung.androidaiautomation.agent.data.CadssRepository
@@ -55,6 +58,7 @@ class AgentDashboardActivity : Activity() {
         addButton(root, "Create army composition", ::createArmy)
         addButton(root, "Browse stored records", ::browseRecords)
         addButton(root, "Resource / upgrade calculator", ::resourceCalculator)
+        addButton(root, "Research a CoC question with Gemini", ::researchWithGemini)
         addButton(root, "Validate and save CASL skill draft", ::createSkillDraft)
         addButton(root, "View skill registry", ::browseSkills)
         addButton(root, "Create crop from a stored original", ::createVisionCrop)
@@ -186,6 +190,50 @@ class AgentDashboardActivity : Activity() {
                     "\n" + plan.warnings.joinToString("\n"))
                 .setPositiveButton("Close", null).show()
         }
+    }
+
+
+    private fun researchWithGemini() {
+        val key = try { CloudKeyStore.read(this) } catch (_: Exception) { null }
+        if (key.isNullOrBlank()) {
+            status.text = "Add your Gemini API key in the main screen settings first."
+            return
+        }
+        val question = EditText(this).apply {
+            hint = "Ask about CoC mechanics, game data, upgrades or strategy"
+            minLines = 3
+        }
+        AlertDialog.Builder(this).setTitle("CoC research with Gemini")
+            .setMessage("Your question will be sent to Google's Gemini API. The answer is saved locally as unverified research; check official game sources before relying on exact costs, levels or balance details.")
+            .setView(question)
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Send research request") { _, _ ->
+                val promptText = question.text.toString().trim()
+                if (promptText.isBlank() || promptText.length > 3000) {
+                    status.text = "Enter a question up to 3000 characters."
+                    return@setPositiveButton
+                }
+                status.text = "Researching with Gemini…"
+                Thread {
+                    try {
+                        val prompt = "You are a Clash of Clans companion research assistant. Answer this question: " +
+                            promptText + "\nSeparate confirmed facts from estimates, state the game-data version/date if known, " +
+                            "name official sources when available, and never invent a citation. This is informational only; do not provide automated gameplay instructions."
+                        val answer = GeminiCloudClient.ask(this, key, prompt).text
+                        val payload = JSONObject().put("question", promptText)
+                            .put("answer", answer).put("provider", "Gemini")
+                            .put("verified", false).put("created_at", System.currentTimeMillis()).toString()
+                        repository.put(CadssRecord(type = "research", payload = payload))
+                        runOnUiThread {
+                            status.text = "Research saved locally as unverified knowledge."
+                            AlertDialog.Builder(this).setTitle("Gemini research result")
+                                .setMessage(answer).setPositiveButton("Close", null).show()
+                        }
+                    } catch (e: Exception) {
+                        runOnUiThread { status.text = "Gemini research failed: " + (e.localizedMessage ?: "Request error") }
+                    }
+                }.start()
+            }.show()
     }
 
     private fun createSkillDraft() {
