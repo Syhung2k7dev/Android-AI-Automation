@@ -13,6 +13,7 @@ import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import android.text.InputType
 
 class MainActivity : Activity() {
     private lateinit var status: TextView
@@ -103,6 +104,8 @@ class MainActivity : Activity() {
         root.addView(button("Export workflow file") { exportWorkflow() }, matchWidth())
         root.addView(button("Import workflow file") { importWorkflow() }, matchWidth())
         root.addView(button("Read screen text offline") { confirmOcrCapture() }, matchWidth())
+        root.addView(button("Gemini cloud settings") { configureGemini() }, matchWidth())
+        root.addView(button("Check Gemini connection") { testGeminiConnection() }, matchWidth())
         root.addView(button("Clear OCR result") {
             getSharedPreferences("ocr_results", MODE_PRIVATE).edit().clear().apply()
             status.text = "Stored OCR result cleared."
@@ -135,6 +138,69 @@ class MainActivity : Activity() {
         }
     }
 
+
+    private fun configureGemini() {
+        val currentKey = CloudKeyStore.read(this).orEmpty()
+        val input = EditText(this).apply {
+            hint = "Gemini API key"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            setSingleLine(true)
+            setText(currentKey)
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Gemini cloud settings")
+            .setMessage(
+                "The API key is stored locally using Android Keystore-backed encrypted preferences. " +
+                    "Cloud requests are sent only when you explicitly test or request them. Screen images are not sent by this setting."
+            )
+            .setView(input)
+            .setNeutralButton("Remove key") { _, _ ->
+                CloudKeyStore.clear(this)
+                status.text = "Gemini API key removed. Local-only mode remains available."
+            }
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Save") { _, _ ->
+                val key = input.text.toString().trim()
+                try {
+                    CloudKeyStore.save(this, key)
+                    status.text = "Gemini API key saved in encrypted local storage."
+                } catch (_: Exception) {
+                    status.text = "Invalid API key format. Check the key and try again."
+                }
+            }
+            .show()
+    }
+
+    private fun testGeminiConnection() {
+        val key = try {
+            CloudKeyStore.read(this)
+        } catch (_: Exception) {
+            null
+        }
+        if (key.isNullOrBlank()) {
+            status.text = "Add a Gemini API key in Gemini cloud settings first."
+            return
+        }
+        status.text = "Testing Gemini connection…"
+        Thread {
+            try {
+                val reply = GeminiCloudClient.ask(
+                    this,
+                    key,
+                    "Reply with exactly: Gemini connection successful."
+                )
+                runOnUiThread {
+                    status.text = "Gemini connected. " + GeminiCloudClient.usage(this) +
+                        " | Response: " + reply.text.take(100)
+                }
+            } catch (error: Exception) {
+                runOnUiThread {
+                    status.text = "Gemini unavailable; local-only mode remains active. " +
+                        (error.localizedMessage ?: "Request failed.")
+                }
+            }
+        }.start()
+    }
 
     private fun confirmOcrCapture() {
         AlertDialog.Builder(this)
