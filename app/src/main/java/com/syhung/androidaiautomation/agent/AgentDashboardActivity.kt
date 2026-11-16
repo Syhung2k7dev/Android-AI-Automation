@@ -1,6 +1,7 @@
 package com.syhung.androidaiautomation.agent
 
 import android.app.Activity
+import android.graphics.BitmapFactory
 import android.app.AlertDialog
 import android.content.Intent
 import android.os.Bundle
@@ -18,6 +19,7 @@ import com.syhung.androidaiautomation.agent.domain.CocDomainRepository
 import com.syhung.androidaiautomation.agent.domain.CocResourceCalculator
 import com.syhung.androidaiautomation.agent.domain.ResourceAmounts
 import com.syhung.androidaiautomation.agent.domain.UpgradeCost
+import com.syhung.androidaiautomation.agent.vision.VisionMemoryStore
 import org.json.JSONObject
 import java.io.File
 
@@ -28,6 +30,7 @@ class AgentDashboardActivity : Activity() {
     private lateinit var skills: SkillRegistry
     private val createBackupCode = 8101
     private val restoreBackupCode = 8102
+    private val importImageCode = 8103
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -53,6 +56,12 @@ class AgentDashboardActivity : Activity() {
         addButton(root, "Resource / upgrade calculator", ::resourceCalculator)
         addButton(root, "Validate and save CASL skill draft", ::createSkillDraft)
         addButton(root, "View skill registry", ::browseSkills)
+        addButton(root, "Import image into Vision Memory", {
+            startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                addCategory(Intent.CATEGORY_OPENABLE)
+                type = "image/*"
+            }, importImageCode)
+        })
         addButton(root, "Export full local backup", {
             startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
                 addCategory(Intent.CATEGORY_OPENABLE)
@@ -189,10 +198,11 @@ class AgentDashboardActivity : Activity() {
     }
 
     private fun browseSkills() {
-        val records = repository.list("skill", includeArchived = true)
-        val rows = records.joinToString("\n") { it.payload.take(300) }
+        val rows = skills.listRecent().joinToString("\n\n") {
+            it.skillId + " · revision " + it.revision + " · " + it.status + "\n" + it.manifest.take(240)
+        }
         AlertDialog.Builder(this).setTitle("Skill registry")
-            .setMessage(if (rows.isBlank()) "No general skill records yet. Versioned drafts are stored in the skill registry." else rows)
+            .setMessage(rows.ifBlank { "No skill drafts saved yet." })
             .setPositiveButton("Close", null).show()
     }
 
@@ -203,6 +213,13 @@ class AgentDashboardActivity : Activity() {
         val uri = data.data!!
         try {
             when (requestCode) {
+                importImageCode -> {
+                    val bitmap = contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it) }
+                        ?: throw IllegalArgumentException("Unable to decode selected image")
+                    val asset = VisionMemoryStore(this, repository).saveOriginal(bitmap, "user_import")
+                    bitmap.recycle()
+                    status.text = "Image stored in Vision Memory: " + asset.id + " (" + asset.width + "×" + asset.height + ")"
+                }
                 createBackupCode -> {
                     val temp = File(cacheDir, "cadss-export.zip")
                     CadssBackupManager(this, repository).createBackup(temp)
