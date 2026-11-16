@@ -131,6 +131,7 @@ class AutomationAccessibilityService : AccessibilityService() {
                         buffer.close()
                     }
                     if (bitmap == null) {
+                        if (!running || captureGeneration != workflowGeneration) return
                         conditionCaptureInFlight = false
                         stopSequence()
                         Toast.makeText(this@AutomationAccessibilityService, "Text condition could not read this screen. Workflow stopped.", Toast.LENGTH_LONG).show()
@@ -236,11 +237,10 @@ class AutomationAccessibilityService : AccessibilityService() {
                     val template = TemplateStore.load(this@AutomationAccessibilityService, condition.template)
                     if (template == null) {
                         screen.recycle()
-                        if (captureGeneration == workflowGeneration) {
-                            conditionCaptureInFlight = false
-                            stopSequence()
-                            Toast.makeText(this@AutomationAccessibilityService, "Saved image template is missing or invalid.", Toast.LENGTH_LONG).show()
-                        }
+                        if (!running || captureGeneration != workflowGeneration) return
+                        conditionCaptureInFlight = false
+                        stopSequence()
+                        Toast.makeText(this@AutomationAccessibilityService, "Saved image template is missing or invalid.", Toast.LENGTH_LONG).show()
                         return
                     }
                     Thread {
