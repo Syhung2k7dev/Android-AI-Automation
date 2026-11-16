@@ -725,12 +725,12 @@ class MainActivity : Activity() {
                     this, SCHEDULER_REQUEST, intent,
                     android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
                 )
-                val triggerAt = System.currentTimeMillis() + minutes!! * 60_000L
+                val triggerAt = System.currentTimeMillis() + intervalMinutes * 60_000L
                 val state = getSharedPreferences("scheduler_state", MODE_PRIVATE)
                 state.edit()
                     .putBoolean("enabled", true)
                     .putBoolean("recurring", isRecurring)
-                    .putLong("interval_minutes", if (isRecurring) minutes else 0L)
+                    .putLong("interval_minutes", if (isRecurring) intervalMinutes else 0L)
                     .putString("profile_name", profileName)
                     .putLong("trigger_at", triggerAt)
                     .apply()
@@ -738,7 +738,7 @@ class MainActivity : Activity() {
                     alarm.setInexactRepeating(
                         android.app.AlarmManager.RTC_WAKEUP,
                         triggerAt,
-                        minutes * 60_000L,
+                        intervalMinutes * 60_000L,
                         pending
                     )
                 } else {
@@ -749,9 +749,9 @@ class MainActivity : Activity() {
                     )
                 }
                 status.text = if (isRecurring) {
-                    "Repeating reminder set every $minutes minutes for '$profileName'. It will be restored after reboot."
+                    "Repeating reminder set every $intervalMinutes minutes for '$profileName'. It will be restored after reboot."
                 } else {
-                    "One-shot reminder scheduled for '$profileName' in about $minutes minutes."
+                    "One-shot reminder scheduled for '$profileName' in about $intervalMinutes minutes."
                 }
             }
             .show()
