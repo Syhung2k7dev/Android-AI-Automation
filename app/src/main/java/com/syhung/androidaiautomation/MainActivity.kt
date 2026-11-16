@@ -154,8 +154,23 @@ class MainActivity : Activity() {
             applyPickedPoint()
             showPendingOcrResult()
             showPendingGeminiAnalysis()
+            handleScheduledProfilePrompt()
             refreshStatus()
         }
+    }
+
+    private fun handleScheduledProfilePrompt() {
+        val name = intent.getStringExtra("scheduled_profile_name") ?: return
+        intent.removeExtra("scheduled_profile_name")
+        AlertDialog.Builder(this)
+            .setTitle("Scheduled profile is ready")
+            .setMessage("The reminder for '$name' has arrived. Review the saved workflow before deciding whether to run it. The schedule never starts automation automatically.")
+            .setNegativeButton("Not now", null)
+            .setPositiveButton("Review profile") { _, _ ->
+                profileInput.setText(name)
+                loadProfile()
+            }
+            .show()
     }
 
 
@@ -498,27 +513,36 @@ class MainActivity : Activity() {
         }
         AlertDialog.Builder(this)
             .setTitle("Schedule a cooldown reminder")
-            .setMessage("The reminder wakes the device only to notify you. It does not start automation or interact with another app.")
+            .setMessage("Schedule a reminder for a saved profile. The device may delay this inexact alarm to save power. When it arrives, the app asks you to review the workflow; it never starts automatically.")
             .setView(input)
             .setNegativeButton("Cancel", null)
             .setPositiveButton("Schedule") { _, _ ->
                 val minutes = input.text.toString().toLongOrNull()?.takeIf { it in 1L..1440L }
-                if (minutes == null) {
-                    status.text = "Enter a reminder between 1 and 1440 minutes."
+                val profileName = profileInput.text.toString().trim()
+                if (minutes == null || profileName.isBlank() ||
+                    preferences.getString("workflow.$profileName", null) == null
+                ) {
+                    status.text = "Enter 1–1440 minutes and the exact name of an existing saved profile."
                 } else {
                     val alarm = getSystemService(ALARM_SERVICE) as android.app.AlarmManager
                     val intent = Intent(this, SchedulerReceiver::class.java)
+                        .putExtra("profile_name", profileName)
                     val pending = android.app.PendingIntent.getBroadcast(
                         this, SCHEDULER_REQUEST,
                         intent,
                         android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
                     )
+                    val triggerAt = System.currentTimeMillis() + minutes * 60_000L
+                    getSharedPreferences("scheduler_state", MODE_PRIVATE).edit()
+                        .putString("profile_name", profileName)
+                        .putLong("trigger_at", triggerAt)
+                        .apply()
                     alarm.setAndAllowWhileIdle(
                         android.app.AlarmManager.RTC_WAKEUP,
-                        System.currentTimeMillis() + minutes * 60_000L,
+                        triggerAt,
                         pending
                     )
-                    status.text = "Cooldown reminder scheduled for about $minutes minutes from now."
+                    status.text = "Reminder scheduled for profile '$profileName' in about $minutes minutes. Automation will require your confirmation."
                 }
             }
             .show()
