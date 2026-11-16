@@ -120,6 +120,7 @@ class MainActivity : Activity() {
         root.addView(button("Check Gemini connection") { testGeminiConnection() }, matchWidth())
         root.addView(button("Analyze current screen with Gemini") { confirmGeminiVisualAnalysis() }, matchWidth())
         root.addView(button("Schedule cooldown reminder") { scheduleCooldownReminder() }, matchWidth())
+        root.addView(button("Cancel cooldown reminder") { cancelCooldownReminder() }, matchWidth())
         root.addView(button("Clear OCR result") {
             getSharedPreferences("ocr_results", MODE_PRIVATE).edit().clear().apply()
             status.text = "Stored OCR result cleared."
@@ -331,6 +332,23 @@ class MainActivity : Activity() {
         addStep(WorkflowStep.WaitForText(textToFind, 30_000L, 2_000L))
     }
 
+    private fun cancelCooldownReminder() {
+        val alarm = getSystemService(ALARM_SERVICE) as android.app.AlarmManager
+        val pending = android.app.PendingIntent.getBroadcast(
+            this,
+            SCHEDULER_REQUEST,
+            Intent(this, SchedulerReceiver::class.java),
+            android.app.PendingIntent.FLAG_NO_CREATE or android.app.PendingIntent.FLAG_IMMUTABLE
+        )
+        if (pending != null) {
+            alarm.cancel(pending)
+            pending.cancel()
+            status.text = "Scheduled cooldown reminder cancelled."
+        } else {
+            status.text = "There is no pending cooldown reminder."
+        }
+    }
+
     private fun addIfText() {
         val textToFind = conditionTextInput.text.toString().trim()
         if (textToFind.isEmpty() || textToFind.length > 80 || textToFind.contains('|')) {
@@ -448,6 +466,13 @@ class MainActivity : Activity() {
     }
 
     private fun scheduleCooldownReminder() {
+        if (android.os.Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 7303)
+            status.text = "Allow notifications, then schedule the reminder again."
+            return
+        }
         val input = EditText(this).apply {
             hint = "Minutes from now (1–1440)"
             setSingleLine(true)
