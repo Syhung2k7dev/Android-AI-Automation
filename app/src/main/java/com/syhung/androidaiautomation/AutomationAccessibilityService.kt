@@ -4,6 +4,7 @@ import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
 import android.graphics.Bitmap
 import android.graphics.Color
+import android.graphics.BitmapFactory
 import android.graphics.Path
 import android.graphics.PixelFormat
 import android.os.Handler
@@ -42,10 +43,17 @@ class AutomationAccessibilityService : AccessibilityService() {
     private var conditionDeadline = 0L
     private var conditionCaptureInFlight = false
     private var workflowGeneration = 0L
+    private var paused = false
+    private var dashboardView: View? = null
+    private var dashboardStatus: TextView? = null
+    private var watchdogRunnable: Runnable? = null
+    private var lastScreenHash: Long? = null
+    private var stagnantSamples = 0
 
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
+        showDashboard()
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) = Unit
@@ -60,6 +68,7 @@ class AutomationAccessibilityService : AccessibilityService() {
         stopSequence()
         cancelPointPicker()
         cancelOcrCapture()
+        removeDashboard()
         if (instance === this) instance = null
         super.onDestroy()
     }
@@ -94,6 +103,16 @@ class AutomationAccessibilityService : AccessibilityService() {
             }
             is WorkflowStep.WaitForText -> beginTextCondition(step)
             is WorkflowStep.WaitForImage -> beginImageCondition(step)
+            is WorkflowStep.IfText -> evaluateTextBranch(step)
+            is WorkflowStep.IfImage -> evaluateImageBranch(step)
+            WorkflowStep.ElseBranch -> {
+                stepIndex = findEndIf(stepIndex) + 1
+                scheduleNextStep(STEP_GAP_MS)
+            }
+            WorkflowStep.EndIf -> {
+                stepIndex++
+                scheduleNextStep(STEP_GAP_MS)
+            }
             is WorkflowStep.Tap -> dispatchStroke(
                 step.x, step.y, step.x, step.y, step.durationMs
             )
@@ -299,6 +318,146 @@ class AutomationAccessibilityService : AccessibilityService() {
         handler.postDelayed(conditionPollRunnable!!, condition.pollIntervalMs)
     }
 
+    private fun evaluateTextBranch(condition: WorkflowStep.IfText) {
+        if (conditionCaptureInFlight) return
+        conditionCaptureInFlight = true
+        val generation = workflowGeneration
+        try {
+            takeScreenshot(Display.DEFAULT_DISPLAY, mainExecutor, object : TakeScreenshotCallback {
+                override fun onSuccess(screenshot: ScreenshotResult) {
+                    val buffer = screenshot.hardwareBuffer
+                    val bitmap = try {
+                        Bitmap.wrapHardwareBuffer(buffer, screenshot.colorSpace)?.copy(Bitmap.Config.ARGB_8888, false)
+                    } catch (_: Exception) { null } finally { buffer.close() }
+                    if (bitmap == null) {
+                        if (running && generation == workflowGeneration) {
+                            conditionCaptureInFlight = false
+                            stopSequence()
+                            Toast.makeText(this@AutomationAccessibilityService, "IF text screenshot unavailable; workflow stopped.", Toast.LENGTH_LONG).show()
+                        }
+                        return
+                    }
+                    val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+                    recognizer.process(InputImage.fromBitmap(bitmap, 0))
+                        .addOnSuccessListener { result ->
+                            if (!running || generation != workflowGeneration) return@addOnSuccessListener
+                            conditionCaptureInFlight = false
+                            applyBranchResult(result.text.contains(condition.text, ignoreCase = true))
+                        }
+                        .addOnFailureListener {
+                            if (running && generation == workflowGeneration) {
+                                conditionCaptureInFlight = false
+                                stopSequence()
+                                Toast.makeText(this@AutomationAccessibilityService, "IF text recognition failed.", Toast.LENGTH_LONG).show()
+                            }
+                        }
+                        .addOnCompleteListener { bitmap.recycle(); recognizer.close() }
+                }
+
+                override fun onFailure(errorCode: Int) {
+                    if (!running || generation != workflowGeneration) return
+                    conditionCaptureInFlight = false
+                    stopSequence()
+                    Toast.makeText(this@AutomationAccessibilityService, "IF text screenshot blocked ($errorCode).", Toast.LENGTH_LONG).show()
+                }
+            })
+        } catch (_: Exception) {
+            conditionCaptureInFlight = false
+            stopSequence()
+        }
+    }
+
+    private fun evaluateImageBranch(condition: WorkflowStep.IfImage) {
+        if (conditionCaptureInFlight) return
+        conditionCaptureInFlight = true
+        val generation = workflowGeneration
+        try {
+            takeScreenshot(Display.DEFAULT_DISPLAY, mainExecutor, object : TakeScreenshotCallback {
+                override fun onSuccess(screenshot: ScreenshotResult) {
+                    val buffer = screenshot.hardwareBuffer
+                    val screen = try {
+                        Bitmap.wrapHardwareBuffer(buffer, screenshot.colorSpace)?.copy(Bitmap.Config.ARGB_8888, false)
+                    } catch (_: Exception) { null } finally { buffer.close() }
+                    if (screen == null) {
+                        if (running && generation == workflowGeneration) {
+                            conditionCaptureInFlight = false
+                            stopSequence()
+                        }
+                        return
+                    }
+                    val template = TemplateStore.load(this@AutomationAccessibilityService, condition.template)
+                    if (template == null) {
+                        screen.recycle()
+                        if (running && generation == workflowGeneration) {
+                            conditionCaptureInFlight = false
+                            stopSequence()
+                            Toast.makeText(this@AutomationAccessibilityService, "IF image template is missing.", Toast.LENGTH_LONG).show()
+                        }
+                        return
+                    }
+                    Thread {
+                        val matched = try {
+                            val native = OpenCvImageMatcher.match(screen, template, condition.threshold)
+                            native?.confidence?.let { it >= condition.threshold }
+                                ?: LocalImageMatcher.match(screen, template, condition.threshold).matched
+                        } catch (_: Exception) {
+                            try { LocalImageMatcher.match(screen, template, condition.threshold).matched } catch (_: Exception) { false }
+                        } finally {
+                            screen.recycle()
+                            template.recycle()
+                        }
+                        handler.post {
+                            if (!running || generation != workflowGeneration) return@post
+                            conditionCaptureInFlight = false
+                            applyBranchResult(matched)
+                        }
+                    }.start()
+                }
+
+                override fun onFailure(errorCode: Int) {
+                    if (!running || generation != workflowGeneration) return
+                    conditionCaptureInFlight = false
+                    stopSequence()
+                    Toast.makeText(this@AutomationAccessibilityService, "IF image screenshot blocked ($errorCode).", Toast.LENGTH_LONG).show()
+                }
+            })
+        } catch (_: Exception) {
+            conditionCaptureInFlight = false
+            stopSequence()
+        }
+    }
+
+    private fun applyBranchResult(matched: Boolean) {
+        val current = stepIndex
+        stepIndex = if (matched) current + 1 else findFalseBranchTarget(current)
+        scheduleNextStep(STEP_GAP_MS)
+    }
+
+    private fun findFalseBranchTarget(ifIndex: Int): Int {
+        var depth = 0
+        for (i in ifIndex + 1 until steps.size) {
+            when (steps[i]) {
+                is WorkflowStep.IfText, is WorkflowStep.IfImage -> depth++
+                WorkflowStep.EndIf -> if (depth == 0) return i + 1 else depth--
+                WorkflowStep.ElseBranch -> if (depth == 0) return i + 1
+                else -> Unit
+            }
+        }
+        return steps.size
+    }
+
+    private fun findEndIf(elseIndex: Int): Int {
+        var depth = 0
+        for (i in elseIndex + 1 until steps.size) {
+            when (steps[i]) {
+                is WorkflowStep.IfText, is WorkflowStep.IfImage -> depth++
+                WorkflowStep.EndIf -> if (depth == 0) return i else depth--
+                else -> Unit
+            }
+        }
+        return steps.lastIndex
+    }
+
     private fun dispatchStroke(
         startX: Float,
         startY: Float,
@@ -322,7 +481,9 @@ class AutomationAccessibilityService : AccessibilityService() {
             override fun onCompleted(gestureDescription: GestureDescription?) {
                 if (!running) return
                 stepIndex++
+                updateDashboard()
                 scheduleNextStep(STEP_GAP_MS)
+                scheduleWatchdog()
             }
 
             override fun onCancelled(gestureDescription: GestureDescription?) {
@@ -339,12 +500,18 @@ class AutomationAccessibilityService : AccessibilityService() {
             sequenceRunnable = null
             executeNextStep()
         }
-        handler.postDelayed(sequenceRunnable!!, delayMs)
+        if (!paused) handler.postDelayed(sequenceRunnable!!, delayMs)
     }
 
     private fun stopSequence() {
         workflowGeneration++
         running = false
+        paused = false
+        watchdogRunnable?.let(handler::removeCallbacks)
+        watchdogRunnable = null
+        lastScreenHash = null
+        stagnantSamples = 0
+        updateDashboard()
         startRunnable?.let(handler::removeCallbacks)
         startRunnable = null
         sequenceRunnable?.let(handler::removeCallbacks)
@@ -543,7 +710,7 @@ class AutomationAccessibilityService : AccessibilityService() {
         fun startQueue(workflows: List<List<WorkflowStep>>, repeatCount: Int): Boolean {
             val service = instance ?: return false
             if (workflows.isEmpty() || workflows.size > 20 || repeatCount !in 1..20 ||
-                workflows.any { it.isEmpty() || it.size > 50 }
+                workflows.any { !WorkflowStep.validateStructure(it) }
             ) return false
 
             service.cancelPointPicker()
@@ -556,6 +723,8 @@ class AutomationAccessibilityService : AccessibilityService() {
             service.repeatLimit = repeatCount
             service.repeatIndex = 0
             service.running = true
+            service.paused = false
+            service.updateDashboard()
             service.startRunnable = Runnable {
                 service.startRunnable = null
                 if (service.running) service.executeNextStep()
@@ -600,6 +769,13 @@ class AutomationAccessibilityService : AccessibilityService() {
             ).show()
             service.pointPickerRunnable = Runnable { service.showPointPicker() }
             service.handler.postDelayed(service.pointPickerRunnable!!, POINT_PICKER_DELAY_MS)
+            return true
+        }
+
+        fun pauseOrResume(): Boolean {
+            val service = instance ?: return false
+            if (!service.running) return false
+            if (service.paused) service.resumeSequence() else service.pauseSequence()
             return true
         }
 
