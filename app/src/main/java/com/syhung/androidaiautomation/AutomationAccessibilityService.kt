@@ -40,6 +40,7 @@ class AutomationAccessibilityService : AccessibilityService() {
     private var pointPickerView: View? = null
     private var pointPickerTarget: String? = null
     private var ocrCaptureRunnable: Runnable? = null
+    private var cloudAnalysisRunnable: Runnable? = null
     private var conditionPollRunnable: Runnable? = null
     private var conditionDeadline = 0L
     private var conditionCaptureInFlight = false
@@ -68,6 +69,7 @@ class AutomationAccessibilityService : AccessibilityService() {
         stopSequence()
         cancelPointPicker()
         cancelOcrCapture()
+        cancelGeminiAnalysis()
         removeDashboard()
         if (instance === this) instance = null
         super.onDestroy()
@@ -720,6 +722,65 @@ class AutomationAccessibilityService : AccessibilityService() {
         }
     }
 
+    private fun captureScreenForGeminiAnalysis() {
+        cloudAnalysisRunnable = null
+        val key = try { CloudKeyStore.read(this) } catch (_: Exception) { null }
+        if (key.isNullOrBlank()) {
+            saveGeminiAnalysis("No Gemini API key is configured.")
+            return
+        }
+        try {
+            takeScreenshot(Display.DEFAULT_DISPLAY, mainExecutor, object : TakeScreenshotCallback {
+                override fun onSuccess(screenshot: ScreenshotResult) {
+                    val buffer = screenshot.hardwareBuffer
+                    val bitmap = try {
+                        Bitmap.wrapHardwareBuffer(buffer, screenshot.colorSpace)?.copy(Bitmap.Config.ARGB_8888, false)
+                    } catch (_: Exception) { null } finally { buffer.close() }
+                    if (bitmap == null) {
+                        saveGeminiAnalysis("Could not prepare the screenshot. It was not uploaded.")
+                        return
+                    }
+                    Thread {
+                        val result = try {
+                            GeminiCloudClient.analyzeImage(
+                                this@AutomationAccessibilityService,
+                                key,
+                                "Analyze this user-authorized Android screenshot. Return concise JSON with keys summary, visible_controls, possible_blocker, suggested_next_step. Describe only visible UI. Do not invent details, do not provide coordinates or gesture commands, and do not claim to have changed the device.",
+                                bitmap
+                            ).text
+                        } catch (error: Exception) {
+                            "Gemini analysis unavailable: ${error.localizedMessage ?: "request failed"}"
+                        } finally {
+                            bitmap.recycle()
+                        }
+                        saveGeminiAnalysis(result)
+                    }.start()
+                }
+
+                override fun onFailure(errorCode: Int) {
+                    saveGeminiAnalysis("Screenshot blocked or unavailable ($errorCode). Nothing was uploaded.")
+                }
+            })
+        } catch (error: Exception) {
+            saveGeminiAnalysis("Screenshot capture failed: ${error.localizedMessage ?: "unknown error"}")
+        }
+    }
+
+    private fun saveGeminiAnalysis(text: String) {
+        getSharedPreferences(GEMINI_RESULT_PREFS, MODE_PRIVATE).edit()
+            .putString("result", text.take(12_000))
+            .putBoolean("ready", true)
+            .apply()
+        handler.post {
+            Toast.makeText(this, "Gemini visual analysis finished. Return to the app to review it.", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun cancelGeminiAnalysis() {
+        cloudAnalysisRunnable?.let(handler::removeCallbacks)
+        cloudAnalysisRunnable = null
+    }
+
     private fun saveOcrResult(text: String) {
         getSharedPreferences(OCR_PREFS, MODE_PRIVATE).edit()
             .putString("result", text.take(MAX_OCR_RESULT_CHARS))
@@ -839,6 +900,7 @@ class AutomationAccessibilityService : AccessibilityService() {
         private const val POINT_PICKER_DELAY_MS = 10_000L
         private const val POINT_PICKER_PREFS = "point_picker"
         private const val OCR_PREFS = "ocr_results"
+        private const val GEMINI_RESULT_PREFS = "gemini_visual_result"
         private const val OCR_CAPTURE_DELAY_MS = 8_000L
         private const val MAX_OCR_RESULT_CHARS = 30_000
         private const val WATCHDOG_INTERVAL_MS = 12_000L
@@ -877,6 +939,24 @@ class AutomationAccessibilityService : AccessibilityService() {
                 if (service.running) service.executeNextStep()
             }
             service.handler.postDelayed(service.startRunnable!!, START_DELAY_MS)
+            return true
+        }
+
+        fun armGeminiAnalysis(): Boolean {
+            val service = instance ?: return false
+            val key = try { CloudKeyStore.read(service) } catch (_: Exception) { null }
+            if (key.isNullOrBlank()) return false
+            service.cancelPointPicker()
+            service.cancelOcrCapture()
+            service.cancelGeminiAnalysis()
+            service.stopSequence()
+            service.getSharedPreferences(GEMINI_RESULT_PREFS, MODE_PRIVATE).edit().clear().apply()
+            Toast.makeText(service, "Switch to the screen you explicitly approved for cloud analysis. One screenshot will be sent to Gemini in 8 seconds.", Toast.LENGTH_LONG).show()
+            service.cloudAnalysisRunnable = Runnable {
+                service.cloudAnalysisRunnable = null
+                service.captureScreenForGeminiAnalysis()
+            }
+            service.handler.postDelayed(service.cloudAnalysisRunnable!!, OCR_CAPTURE_DELAY_MS)
             return true
         }
 
@@ -931,6 +1011,7 @@ class AutomationAccessibilityService : AccessibilityService() {
                 it.stopSequence()
                 it.cancelPointPicker()
                 it.cancelOcrCapture()
+                it.cancelGeminiAnalysis()
             }
         }
     }
