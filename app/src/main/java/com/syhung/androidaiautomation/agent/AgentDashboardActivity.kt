@@ -104,7 +104,7 @@ class AgentDashboardActivity : Activity() {
         val th = values[2].toIntOrNull()
         if (values[0].isBlank() || (values[2].isNotBlank() && th == null)) status.text = "Enter a profile name and valid optional Town Hall level."
         else try {
-            val id = domain.saveAccount(displayName = values[0], playerTag = values[1].ifBlank { null }, townHall = th)
+            val id = domain.saveAccount(displayName = values[0], playerTag = values[1].takeIf { it.isNotBlank() }, townHall = th)
             status.text = "Account profile saved locally: " + id
         } catch (e: Exception) { status.text = e.message ?: "Could not save profile." }
     }
@@ -116,7 +116,7 @@ class AgentDashboardActivity : Activity() {
         val th = v[2].toIntOrNull()
         if (v[0].isBlank() || th == null) status.text = "Enter a layout name and Town Hall level."
         else try {
-            val id = domain.saveLayout(v[1].ifBlank { null }, v[0], th, v[3].lowercase(), v[4].ifBlank { null })
+            val id = domain.saveLayout(v[1].takeIf { it.isNotBlank() }, v[0], th, v[3].lowercase(), v[4].takeIf { it.isNotBlank() })
             status.text = "Layout metadata saved (unverified): " + id
         } catch (e: Exception) { status.text = e.message ?: "Invalid layout." }
     }
@@ -131,7 +131,7 @@ class AgentDashboardActivity : Activity() {
         else {
             val composition = try { JSONObject(v[4]) } catch (_: Exception) { JSONObject().put("notes", v[4]) }
             try {
-                val id = domain.saveArmy(v[1].ifBlank { null }, v[0], th, capacity, composition)
+                val id = domain.saveArmy(v[1].takeIf { it.isNotBlank() }, v[0], th, capacity, composition)
                 status.text = "Army record saved (unverified): " + id
             } catch (e: Exception) { status.text = e.message ?: "Invalid army record." }
         }
