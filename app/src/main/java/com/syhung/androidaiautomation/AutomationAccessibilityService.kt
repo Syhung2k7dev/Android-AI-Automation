@@ -27,6 +27,8 @@ class AutomationAccessibilityService : AccessibilityService() {
     private val handler = Handler(Looper.getMainLooper())
     private var running = false
     private var steps: List<WorkflowStep> = emptyList()
+    private var workflowQueue: List<List<WorkflowStep>> = emptyList()
+    private var queueIndex = 0
     private var stepIndex = 0
     private var repeatLimit = 1
     private var repeatIndex = 0
@@ -67,7 +69,17 @@ class AutomationAccessibilityService : AccessibilityService() {
         if (stepIndex >= steps.size) {
             repeatIndex++
             if (repeatIndex >= repeatLimit) {
-                stopSequence()
+                if (queueIndex + 1 >= workflowQueue.size) {
+                    stopSequence()
+                    Toast.makeText(this, "Profile queue completed.", Toast.LENGTH_LONG).show()
+                    return
+                }
+                queueIndex++
+                steps = workflowQueue[queueIndex]
+                stepIndex = 0
+                repeatIndex = 0
+                Toast.makeText(this, "Starting profile ${queueIndex + 1} of ${workflowQueue.size}.", Toast.LENGTH_SHORT).show()
+                scheduleNextStep(STEP_GAP_MS)
                 return
             }
             stepIndex = 0
@@ -342,6 +354,8 @@ class AutomationAccessibilityService : AccessibilityService() {
         conditionCaptureInFlight = false
         conditionDeadline = 0L
         steps = emptyList()
+        workflowQueue = emptyList()
+        queueIndex = 0
         stepIndex = 0
         repeatIndex = 0
     }
@@ -523,14 +537,21 @@ class AutomationAccessibilityService : AccessibilityService() {
 
         fun isConnected(): Boolean = instance != null
 
-        fun start(workflow: List<WorkflowStep>, repeatCount: Int): Boolean {
+        fun start(workflow: List<WorkflowStep>, repeatCount: Int): Boolean =
+            startQueue(listOf(workflow), repeatCount)
+
+        fun startQueue(workflows: List<List<WorkflowStep>>, repeatCount: Int): Boolean {
             val service = instance ?: return false
-            if (workflow.isEmpty() || workflow.size > 50 || repeatCount !in 1..20) return false
+            if (workflows.isEmpty() || workflows.size > 20 || repeatCount !in 1..20 ||
+                workflows.any { it.isEmpty() || it.size > 50 }
+            ) return false
 
             service.cancelPointPicker()
             service.cancelOcrCapture()
             service.stopSequence()
-            service.steps = workflow.toList()
+            service.workflowQueue = workflows.map { it.toList() }
+            service.queueIndex = 0
+            service.steps = service.workflowQueue.first()
             service.stepIndex = 0
             service.repeatLimit = repeatCount
             service.repeatIndex = 0
