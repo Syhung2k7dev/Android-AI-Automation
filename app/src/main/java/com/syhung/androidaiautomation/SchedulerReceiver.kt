@@ -18,10 +18,12 @@ class SchedulerReceiver : BroadcastReceiver() {
                 NotificationChannel(channelId, "Cooldown reminders", NotificationManager.IMPORTANCE_DEFAULT)
             )
         }
+        val profileName = intent?.getStringExtra("profile_name").orEmpty()
+        context.getSharedPreferences("scheduler_state", Context.MODE_PRIVATE).edit().clear().apply()
         val openApp = PendingIntent.getActivity(
             context,
             7302,
-            Intent(context, MainActivity::class.java),
+            Intent(context, MainActivity::class.java).putExtra("scheduled_profile_name", profileName),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         val notification = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -31,7 +33,7 @@ class SchedulerReceiver : BroadcastReceiver() {
             Notification.Builder(context)
         }.setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
             .setContentTitle("Automation cooldown finished")
-            .setContentText("Review your workflow and choose whether to continue.")
+            .setContentText(if (profileName.isBlank()) "Review your workflow and choose whether to continue." else "Scheduled profile '$profileName' is ready for review.")
             .setContentIntent(openApp)
             .setAutoCancel(true)
             .build()
