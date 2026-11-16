@@ -8,6 +8,7 @@ import android.graphics.Path
 import android.graphics.PixelFormat
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.view.Display
 import android.view.Gravity
 import android.view.MotionEvent
@@ -35,6 +36,9 @@ class AutomationAccessibilityService : AccessibilityService() {
     private var pointPickerView: View? = null
     private var pointPickerTarget: String? = null
     private var ocrCaptureRunnable: Runnable? = null
+    private var conditionPollRunnable: Runnable? = null
+    private var conditionDeadline = 0L
+    private var conditionCaptureInFlight = false
 
     override fun onServiceConnected() {
         super.onServiceConnected()
@@ -75,6 +79,7 @@ class AutomationAccessibilityService : AccessibilityService() {
                 stepIndex++
                 scheduleNextStep(step.durationMs)
             }
+            is WorkflowStep.WaitForText -> beginTextCondition(step)
             is WorkflowStep.Tap -> dispatchStroke(
                 step.x, step.y, step.x, step.y, step.durationMs
             )
@@ -82,6 +87,95 @@ class AutomationAccessibilityService : AccessibilityService() {
                 step.startX, step.startY, step.endX, step.endY, step.durationMs
             )
         }
+    }
+
+    private fun beginTextCondition(condition: WorkflowStep.WaitForText) {
+        conditionDeadline = SystemClock.elapsedRealtime() + condition.timeoutMs
+        conditionCaptureInFlight = false
+        captureForTextCondition(condition)
+    }
+
+    private fun captureForTextCondition(condition: WorkflowStep.WaitForText) {
+        if (!running || conditionCaptureInFlight) return
+        if (SystemClock.elapsedRealtime() >= conditionDeadline) {
+            stopSequence()
+            Toast.makeText(this, "Text condition timed out. Workflow stopped.", Toast.LENGTH_LONG).show()
+            return
+        }
+        conditionCaptureInFlight = true
+        try {
+            takeScreenshot(Display.DEFAULT_DISPLAY, mainExecutor, object : TakeScreenshotCallback {
+                override fun onSuccess(screenshot: ScreenshotResult) {
+                    val buffer = screenshot.hardwareBuffer
+                    val bitmap = try {
+                        Bitmap.wrapHardwareBuffer(buffer, screenshot.colorSpace)
+                            ?.copy(Bitmap.Config.ARGB_8888, false)
+                    } catch (_: Exception) {
+                        null
+                    } finally {
+                        buffer.close()
+                    }
+                    if (bitmap == null) {
+                        conditionCaptureInFlight = false
+                        stopSequence()
+                        Toast.makeText(this@AutomationAccessibilityService, "Text condition could not read this screen. Workflow stopped.", Toast.LENGTH_LONG).show()
+                        return
+                    }
+                    val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+                    recognizer.process(InputImage.fromBitmap(bitmap, 0))
+                        .addOnSuccessListener { result ->
+                            if (!running) return@addOnSuccessListener
+                            conditionCaptureInFlight = false
+                            if (result.text.contains(condition.text, ignoreCase = true)) {
+                                stepIndex++
+                                conditionPollRunnable?.let(handler::removeCallbacks)
+                                conditionPollRunnable = null
+                                scheduleNextStep(STEP_GAP_MS)
+                            } else {
+                                scheduleConditionPoll(condition)
+                            }
+                        }
+                        .addOnFailureListener {
+                            conditionCaptureInFlight = false
+                            if (running) {
+                                stopSequence()
+                                Toast.makeText(this@AutomationAccessibilityService, "Text recognition failed. Workflow stopped.", Toast.LENGTH_LONG).show()
+                            }
+                        }
+                        .addOnCompleteListener {
+                            bitmap.recycle()
+                            recognizer.close()
+                        }
+                }
+
+                override fun onFailure(errorCode: Int) {
+                    conditionCaptureInFlight = false
+                    if (running) {
+                        stopSequence()
+                        Toast.makeText(this@AutomationAccessibilityService, "Screen capture unavailable for text condition (error $errorCode).", Toast.LENGTH_LONG).show()
+                    }
+                }
+            })
+        } catch (_: Exception) {
+            conditionCaptureInFlight = false
+            stopSequence()
+            Toast.makeText(this, "Unable to capture screen for text condition.", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun scheduleConditionPoll(condition: WorkflowStep.WaitForText) {
+        if (!running) return
+        if (SystemClock.elapsedRealtime() >= conditionDeadline) {
+            stopSequence()
+            Toast.makeText(this, "Text condition timed out. Workflow stopped.", Toast.LENGTH_LONG).show()
+            return
+        }
+        conditionPollRunnable?.let(handler::removeCallbacks)
+        conditionPollRunnable = Runnable {
+            conditionPollRunnable = null
+            captureForTextCondition(condition)
+        }
+        handler.postDelayed(conditionPollRunnable!!, condition.pollIntervalMs)
     }
 
     private fun dispatchStroke(
@@ -133,6 +227,10 @@ class AutomationAccessibilityService : AccessibilityService() {
         startRunnable = null
         sequenceRunnable?.let(handler::removeCallbacks)
         sequenceRunnable = null
+        conditionPollRunnable?.let(handler::removeCallbacks)
+        conditionPollRunnable = null
+        conditionCaptureInFlight = false
+        conditionDeadline = 0L
         steps = emptyList()
         stepIndex = 0
         repeatIndex = 0
