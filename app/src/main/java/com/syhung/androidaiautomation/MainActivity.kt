@@ -656,7 +656,11 @@ class MainActivity : Activity() {
             .setPositiveButton("Schedule") { _, _ ->
                 val minutes = input.text.toString().toLongOrNull()
                 val isRecurring = recurring.isChecked
-                val validMinutes = if (isRecurring) minutes in 15L..10_080L else minutes in 1L..1_440L
+                val validMinutes = minutes != null && if (isRecurring) {
+                    minutes in 15L..10_080L
+                } else {
+                    minutes in 1L..1_440L
+                }
                 val profileName = profileInput.text.toString().trim()
                 if (!validMinutes || profileName.isBlank() ||
                     preferences.getString("workflow.$profileName", null) == null
