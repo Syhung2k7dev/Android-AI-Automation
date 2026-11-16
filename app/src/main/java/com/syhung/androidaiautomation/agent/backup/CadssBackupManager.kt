@@ -107,7 +107,7 @@ class CadssBackupManager(context: Context, private val repository: CadssReposito
                     createdAt = item.optLong("created_at", System.currentTimeMillis()),
                     updatedAt = item.optLong("updated_at", System.currentTimeMillis()),
                     revision = item.optLong("revision", 1), status = item.optString("status", "active"),
-                    ownerRef = item.optString("owner_ref").ifBlank { null },
+                    ownerRef = item.optString("owner_ref").takeIf { it.isNotBlank() },
                     sourceRefs = strings(item.optJSONArray("source_refs")),
                     tags = strings(item.optJSONArray("tags")), payload = item.getString("payload"),
                     extensions = item.optString("extensions", "{}")
