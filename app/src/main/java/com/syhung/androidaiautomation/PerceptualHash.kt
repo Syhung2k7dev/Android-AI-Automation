@@ -7,7 +7,11 @@ import kotlin.math.sqrt
 object PerceptualHash {
     fun compute(bitmap: Bitmap): Long {
         val size = 32
-        val small = Bitmap.createScaledBitmap(bitmap, size, size, true)
+        val small = if (bitmap.width == size && bitmap.height == size) {
+            bitmap.copy(Bitmap.Config.ARGB_8888, false)
+        } else {
+            Bitmap.createScaledBitmap(bitmap, size, size, true)
+        }
         try {
             val pixels = IntArray(size * size)
             small.getPixels(pixels, 0, size, 0, 0, size, size)
