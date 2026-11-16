@@ -15,6 +15,8 @@ An independent Android automation prototype built around explicit user control a
 - Explicit run confirmation, five-second start delay, finite repeats, and Stop control.
 - User-confirmed one-shot OCR plus workflow text conditions that poll screenshots locally until a configured phrase appears or the timeout expires.
 - OCR results are temporarily stored locally for display; the screenshot itself is not saved or uploaded.
+- Optional Gemini cloud foundation: API key stored with AndroidX encrypted preferences backed by Android Keystore, explicit connection test, bounded retries, persistent failure circuit breaker, and token/request counters.
+- Cloud API use is opt-in and explicit. The current integration tests text-only requests; it does not upload screenshots or automatically trigger cloud recovery.
 - Current workflow limits: 50 steps and 20 repeats.
 - OCR condition defaults: 30-second timeout, 2-second polling interval; both are bounded to avoid indefinite capture loops.
 
@@ -25,7 +27,7 @@ This remains an early development build, not the complete product. OCR text cond
 - Local image matching and image-based workflow conditions.
 - OCR branching beyond the current wait-until-text-appears step.
 - Scheduling and foreground execution controls.
-- Optional AI-assisted recovery.
+- Screenshot-based Gemini recovery and structured workflow mutation are not yet implemented; the current cloud integration is a text-only connection foundation.
 - Multi-account workflow management.
 - Production release signing and distribution review.
 
@@ -35,6 +37,10 @@ This remains an early development build, not the complete product. OCR text cond
 - Minimum Android version: Android 8.0 (API 26).
 - No root requirement.
 - A computer is not required to use an installed APK.
+
+## Optional Gemini API settings
+
+Users may enter or remove their own Gemini API key in the app. The key is stored locally with encrypted preferences backed by Android Keystore. A separate user action is required to test the connection. The current integration sends only a short text test prompt, tracks API-reported token usage, retries transient network/server failures with bounded exponential backoff, and opens a five-minute circuit breaker after repeated failures. Cloud use is optional; local workflows remain available without a key. No screenshot is uploaded by the current implementation. API keys and requests are sensitive: do not share them, and review Google's API terms, data handling, and billing before enabling cloud access.
 
 ## Security and permissions
 
