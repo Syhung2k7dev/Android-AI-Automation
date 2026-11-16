@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.util.Base64
 import java.io.ByteArrayOutputStream
 import org.json.JSONObject
+import org.json.JSONArray
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
@@ -68,10 +69,19 @@ object GeminiCloudClient {
         for (attempt in 0 until MAX_ATTEMPTS) {
             try {
                 val reply = request(apiKey, prompt, image)
+                val requestNow = System.currentTimeMillis()
+                val oldTimes = try { JSONArray(prefs.getString("request_times", "[]")) } catch (_: Exception) { JSONArray() }
+                val recentTimes = JSONArray()
+                for (i in 0 until oldTimes.length()) {
+                    val timestamp = oldTimes.optLong(i, 0L)
+                    if (timestamp > requestNow - 60_000L) recentTimes.put(timestamp)
+                }
+                recentTimes.put(requestNow)
                 prefs.edit()
                     .putInt("failures", 0)
                     .putLong("open_until", 0L)
                     .putLong("requests", prefs.getLong("requests", 0L) + 1L)
+                    .putString("request_times", recentTimes.toString())
                     .putLong("input_tokens", prefs.getLong("input_tokens", 0L) + reply.promptTokens)
                     .putLong("output_tokens", prefs.getLong("output_tokens", 0L) + reply.outputTokens)
                     .putLong("total_tokens", prefs.getLong("total_tokens", 0L) + reply.totalTokens)
@@ -99,7 +109,11 @@ object GeminiCloudClient {
 
     fun usage(context: Context): String {
         val p = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        return "Requests: ${p.getLong("requests", 0L)} | Input tokens: ${p.getLong("input_tokens", 0L)} | Output tokens: ${p.getLong("output_tokens", 0L)}"
+        val times = try { JSONArray(p.getString("request_times", "[]")) } catch (_: Exception) { JSONArray() }
+        val now = System.currentTimeMillis()
+        var rpm = 0
+        for (i in 0 until times.length()) if (times.optLong(i, 0L) > now - 60_000L) rpm++
+        return "RPM: $rpm | Total requests: ${p.getLong("requests", 0L)} | Input tokens: ${p.getLong("input_tokens", 0L)} | Output tokens: ${p.getLong("output_tokens", 0L)} | Total tokens: ${p.getLong("total_tokens", 0L)}"
     }
 
     private fun request(apiKey: String, prompt: String, image: Bitmap?): GeminiReply {
