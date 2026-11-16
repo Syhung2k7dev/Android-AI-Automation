@@ -10,17 +10,20 @@ sealed class WorkflowStep {
         val durationMs: Long
     ) : WorkflowStep()
     data class Wait(val durationMs: Long) : WorkflowStep()
+    data class WaitForText(val text: String, val timeoutMs: Long, val pollIntervalMs: Long) : WorkflowStep()
 
     fun displayText(): String = when (this) {
         is Tap -> "Tap (${x.toInt()}, ${y.toInt()})"
         is Swipe -> "Swipe (${startX.toInt()}, ${startY.toInt()}) to (${endX.toInt()}, ${endY.toInt()})"
         is Wait -> "Wait ${durationMs} ms"
+        is WaitForText -> "Wait for text: '$text' (timeout ${timeoutMs} ms)"
     }
 
     fun encode(): String = when (this) {
         is Tap -> "T|$x|$y|$durationMs"
         is Swipe -> "S|$startX|$startY|$endX|$endY|$durationMs"
         is Wait -> "W|$durationMs"
+        is WaitForText -> "C|$text|$timeoutMs|$pollIntervalMs"
     }
 
     companion object {
@@ -51,6 +54,15 @@ sealed class WorkflowStep {
                 } else null
                 "W" -> if (parts.size == 2) {
                     parts[1].toLongOrNull()?.takeIf { it in 100L..60_000L }?.let { Wait(it) }
+                } else null
+                "C" -> if (parts.size == 4) {
+                    val text = parts[1].trim()
+                    val timeout = parts[2].toLongOrNull()
+                    val poll = parts[3].toLongOrNull()
+                    if (text.isNotEmpty() && text.length <= 80 && !text.contains('\n') &&
+                        timeout != null && timeout in 1_000L..120_000L &&
+                        poll != null && poll in 1_000L..10_000L && poll <= timeout
+                    ) WaitForText(text, timeout, poll) else null
                 } else null
                 else -> null
             }

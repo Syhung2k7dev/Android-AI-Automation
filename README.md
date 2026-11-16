@@ -5,7 +5,7 @@ An independent Android automation prototype built around explicit user control a
 ## Current implementation
 
 - Android Accessibility Service used for explicitly user-started tap and swipe gestures.
-- Multi-step workflow editor with tap, swipe, and wait actions.
+- Multi-step workflow editor with tap, swipe, wait, and bounded OCR text-condition actions.
 - Visual coordinate picker for tap points and both swipe endpoints.
 - Reorder and delete individual workflow steps.
 - Save and load named workflows locally.
@@ -13,16 +13,17 @@ An independent Android automation prototype built around explicit user control a
 - Import and export workflow files through Android's document picker.
 - Validation of imported step types, coordinates, durations, workflow size, and step count.
 - Explicit run confirmation, five-second start delay, finite repeats, and Stop control.
-- One-shot, user-confirmed screenshot capture followed by on-device OCR using a bundled Latin-script model.
+- User-confirmed one-shot OCR plus workflow text conditions that poll screenshots locally until a configured phrase appears or the timeout expires.
 - OCR results are temporarily stored locally for display; the screenshot itself is not saved or uploaded.
 - Current workflow limits: 50 steps and 20 repeats.
+- OCR condition defaults: 30-second timeout, 2-second polling interval; both are bounded to avoid indefinite capture loops.
 
-This remains an early development build, not the complete product. Image matching, OCR-driven workflow conditions, scheduling, and multi-account management are not yet implemented.
+This remains an early development build, not the complete product. OCR text conditions are implemented as bounded wait steps; image matching, branching, scheduling, and multi-account management are not yet implemented.
 
 ## Not implemented
 
 - Local image matching and image-based workflow conditions.
-- OCR-driven conditional branching and text-triggered actions.
+- OCR branching beyond the current wait-until-text-appears step.
 - Scheduling and foreground execution controls.
 - Optional AI-assisted recovery.
 - Multi-account workflow management.
@@ -61,7 +62,7 @@ The implementation is original and does not copy Smart AutoClicker's source. Any
 
 1. Device compatibility and execution reliability checks.
 2. Local image matching and visual conditions.
-3. OCR-driven conditions with explicit user configuration.
+3. Expand OCR conditions into explicit if/else branching.
 4. Scheduling with visible status and reliable cancellation.
 5. Optional, bounded AI-assisted recovery.
 6. Release signing, distribution review, and security verification.
