@@ -79,9 +79,14 @@ class MainActivity : Activity() {
         root.addView(button("Add swipe step") { addSwipe() }, matchWidth())
         root.addView(button("Add wait step") { addWait() }, matchWidth())
         root.addView(button("Add wait-for-text condition") { addWaitForText() }, matchWidth())
+        root.addView(button("Add IF text condition") { addIfText() }, matchWidth())
+        root.addView(button("Add IF image condition") { addIfImage() }, matchWidth())
+        root.addView(button("Add ELSE branch") { addElseBranch() }, matchWidth())
+        root.addView(button("Add END IF") { addEndIf() }, matchWidth())
         root.addView(button("Import image template") { importImageTemplate() }, matchWidth())
         root.addView(button("Add wait-for-image condition") { addWaitForImage() }, matchWidth())
         root.addView(button("Manage image templates") { manageImageTemplates() }, matchWidth())
+        root.addView(button("Learn template from screen region") { confirmTemplateLearning() }, matchWidth())
         root.addView(button("Manage / reorder steps") { manageStep() }, matchWidth())
         root.addView(button("Clear workflow") {
             if (steps.isNotEmpty()) {
@@ -113,6 +118,11 @@ class MainActivity : Activity() {
         root.addView(button("Read screen text offline") { confirmOcrCapture() }, matchWidth())
         root.addView(button("Gemini cloud settings") { configureGemini() }, matchWidth())
         root.addView(button("Check Gemini connection") { testGeminiConnection() }, matchWidth())
+        root.addView(button("Gemini token / RPM monitor") { showGeminiUsage() }, matchWidth())
+        root.addView(button("Analyze current screen with Gemini") { confirmGeminiVisualAnalysis() }, matchWidth())
+        root.addView(button("Generate workflow draft with Gemini") { requestGeminiWorkflowDraft() }, matchWidth())
+        root.addView(button("Schedule cooldown reminder") { scheduleCooldownReminder() }, matchWidth())
+        root.addView(button("Cancel cooldown reminder") { cancelCooldownReminder() }, matchWidth())
         root.addView(button("Clear OCR result") {
             getSharedPreferences("ocr_results", MODE_PRIVATE).edit().clear().apply()
             status.text = "Stored OCR result cleared."
@@ -121,6 +131,9 @@ class MainActivity : Activity() {
             startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
         }, matchWidth())
         root.addView(button("Run workflow") { confirmStart() }, matchWidth())
+        root.addView(button("Pause / Resume") {
+            if (!AutomationAccessibilityService.pauseOrResume()) status.text = "No running workflow to pause or resume."
+        }, matchWidth())
         root.addView(button("Stop") {
             AutomationAccessibilityService.stop()
             status.text = "Stopped. Pending start and remaining steps were cancelled."
@@ -141,8 +154,24 @@ class MainActivity : Activity() {
         if (::status.isInitialized) {
             applyPickedPoint()
             showPendingOcrResult()
+            showPendingGeminiAnalysis()
+            handleScheduledProfilePrompt()
             refreshStatus()
         }
+    }
+
+    private fun handleScheduledProfilePrompt() {
+        val name = intent.getStringExtra("scheduled_profile_name") ?: return
+        intent.removeExtra("scheduled_profile_name")
+        AlertDialog.Builder(this)
+            .setTitle("Scheduled profile is ready")
+            .setMessage("The reminder for '$name' has arrived. Review the saved workflow before deciding whether to run it. The schedule never starts automation automatically.")
+            .setNegativeButton("Not now", null)
+            .setPositiveButton("Review profile") { _, _ ->
+                profileInput.setText(name)
+                loadProfile()
+            }
+            .show()
     }
 
 
@@ -207,6 +236,22 @@ class MainActivity : Activity() {
                 }
             }
         }.start()
+    }
+
+    private fun showGeminiUsage() {
+        val usage = GeminiCloudClient.usage(this)
+        val circuit = getSharedPreferences("gemini_resilience", MODE_PRIVATE)
+        val openUntil = circuit.getLong("open_until", 0L)
+        val remaining = ((openUntil - System.currentTimeMillis()).coerceAtLeast(0L) / 1000L)
+        AlertDialog.Builder(this)
+            .setTitle("Gemini usage and quota")
+            .setMessage(
+                "$usage\n\nCircuit breaker: " +
+                    if (remaining > 0L) "OPEN — local-only mode for about $remaining seconds."
+                    else "CLOSED — cloud requests available when explicitly requested."
+            )
+            .setPositiveButton("Close", null)
+            .show()
     }
 
     private fun confirmOcrCapture() {
@@ -320,6 +365,239 @@ class MainActivity : Activity() {
         addStep(WorkflowStep.WaitForText(textToFind, 30_000L, 2_000L))
     }
 
+    private fun cancelCooldownReminder() {
+        val alarm = getSystemService(ALARM_SERVICE) as android.app.AlarmManager
+        val pending = android.app.PendingIntent.getBroadcast(
+            this,
+            SCHEDULER_REQUEST,
+            Intent(this, SchedulerReceiver::class.java),
+            android.app.PendingIntent.FLAG_NO_CREATE or android.app.PendingIntent.FLAG_IMMUTABLE
+        )
+        if (pending != null) {
+            alarm.cancel(pending)
+            pending.cancel()
+            getSharedPreferences("scheduler_state", MODE_PRIVATE).edit().clear().apply()
+            status.text = "Scheduled cooldown reminder cancelled."
+        } else {
+            status.text = "There is no pending cooldown reminder."
+        }
+    }
+
+    private fun addIfText() {
+        val textToFind = conditionTextInput.text.toString().trim()
+        if (textToFind.isEmpty() || textToFind.length > 80 || textToFind.contains('|')) {
+            status.text = "Enter a valid condition text (1–80 characters)."
+            return
+        }
+        addStep(WorkflowStep.IfText(textToFind))
+    }
+
+    private fun addIfImage() {
+        val name = templateInput.text.toString().trim()
+        if (name !in TemplateStore.names(this)) {
+            status.text = "Import or select an image template first."
+            return
+        }
+        addStep(WorkflowStep.IfImage(name, 0.85f))
+    }
+
+    private fun addElseBranch() {
+        val stack = mutableListOf<Boolean>()
+        for (step in steps) when (step) {
+            is WorkflowStep.IfText, is WorkflowStep.IfImage -> stack.add(false)
+            WorkflowStep.ElseBranch -> if (stack.isNotEmpty()) stack[stack.lastIndex] = true
+            WorkflowStep.EndIf -> if (stack.isNotEmpty()) stack.removeAt(stack.lastIndex)
+            else -> Unit
+        }
+        if (stack.isEmpty() || stack.last()) {
+            status.text = "ELSE requires an open IF block without an existing ELSE."
+            return
+        }
+        addStep(WorkflowStep.ElseBranch)
+    }
+
+    private fun addEndIf() {
+        var depth = 0
+        for (step in steps) when (step) {
+            is WorkflowStep.IfText, is WorkflowStep.IfImage -> depth++
+            WorkflowStep.EndIf -> depth--
+            else -> Unit
+        }
+        if (depth <= 0) {
+            status.text = "END IF has no matching open IF."
+            return
+        }
+        addStep(WorkflowStep.EndIf)
+    }
+
+    private fun confirmTemplateLearning() {
+        val name = templateInput.text.toString().trim()
+        val x1 = xInput.text.toString().toIntOrNull()
+        val y1 = yInput.text.toString().toIntOrNull()
+        val x2 = endXInput.text.toString().toIntOrNull()
+        val y2 = endYInput.text.toString().toIntOrNull()
+        if (!name.matches(Regex("[A-Za-z0-9_-]{1,40}")) ||
+            x1 == null || y1 == null || x2 == null || y2 == null ||
+            x1 < 0 || y1 < 0 || x2 < 0 || y2 < 0 ||
+            kotlin.math.abs(x2 - x1) < 8 || kotlin.math.abs(y2 - y1) < 8
+        ) {
+            status.text = "Enter a valid template name and two screen coordinates defining a region at least 8×8 pixels."
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Save a local image template?")
+            .setMessage("The app will capture one screen after 8 seconds and save only the rectangle between the two coordinate points in private app storage. The image will not be uploaded.")
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Save template") { _, _ ->
+                if (AutomationAccessibilityService.armTemplateLearning(name, x1, y1, x2, y2)) {
+                    status.text = "Template capture armed. Switch to the intended screen."
+                } else {
+                    status.text = "Accessibility service is not connected or the crop coordinates are invalid."
+                }
+            }
+            .show()
+    }
+
+    private fun requestGeminiWorkflowDraft() {
+        val key = try { CloudKeyStore.read(this) } catch (_: Exception) { null }
+        if (key.isNullOrBlank()) {
+            status.text = "Save a Gemini API key before generating a workflow draft."
+            return
+        }
+        val goalInput = EditText(this).apply {
+            hint = "Describe the workflow goal"
+            minLines = 2
+            setText("Open the target screen, wait until Ready appears, then continue.")
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Generate a workflow draft")
+            .setMessage("Gemini will generate a JSON draft from your text description. It will not run automatically. Review all coordinates and steps before saving or starting.")
+            .setView(goalInput)
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Generate") { _, _ ->
+                val goal = goalInput.text.toString().trim()
+                if (goal.isBlank() || goal.length > 1_000) {
+                    status.text = "Enter a goal between 1 and 1000 characters."
+                    return@setPositiveButton
+                }
+                status.text = "Generating and validating a workflow draft…"
+                Thread {
+                    try {
+                        val draft = GeminiCloudClient.generateWorkflowDraft(this, key, goal)
+                        runOnUiThread {
+                            val preview = draft.mapIndexed { index, step -> "${index + 1}. ${step.displayText()}" }.joinToString("\n")
+                            AlertDialog.Builder(this)
+                                .setTitle("Review generated workflow")
+                                .setMessage(preview)
+                                .setNegativeButton("Discard", null)
+                                .setPositiveButton("Load draft") { _, _ ->
+                                    replaceSteps(draft)
+                                    status.text = "Draft loaded. Review every coordinate and condition before saving or running."
+                                }
+                                .show()
+                        }
+                    } catch (error: Exception) {
+                        runOnUiThread {
+                            status.text = "Workflow draft rejected: ${error.localizedMessage ?: "Gemini or validation error"}"
+                        }
+                    }
+                }.start()
+            }
+            .show()
+    }
+
+    private fun confirmGeminiVisualAnalysis() {
+        if (!CloudKeyStore.hasKey(this)) {
+            status.text = "Save a Gemini API key before requesting visual analysis."
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Upload one screenshot to Gemini?")
+            .setMessage(
+                "After an 8-second switch window, one screenshot of the current screen will be sent to Google's Gemini API for visual analysis. " +
+                    "Do not include passwords, private messages, payment details, or other sensitive information. " +
+                    "Gemini suggestions are informational only; the app will not execute them."
+            )
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("I agree — analyze once") { _, _ ->
+                if (AutomationAccessibilityService.armGeminiAnalysis()) {
+                    status.text = "One screenshot will be captured and sent to Gemini in 8 seconds."
+                } else {
+                    status.text = "Accessibility service is not connected or Gemini key is unavailable."
+                }
+            }
+            .show()
+    }
+
+    private fun showPendingGeminiAnalysis() {
+        val store = getSharedPreferences("gemini_visual_result", MODE_PRIVATE)
+        if (!store.getBoolean("ready", false)) return
+        val result = store.getString("result", "No analysis available").orEmpty()
+        store.edit().clear().apply()
+        val view = TextView(this).apply {
+            text = result
+            textSize = 15f
+            setTextIsSelectable(true)
+            setPadding(20, 16, 20, 16)
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Gemini visual analysis")
+            .setView(ScrollView(this).apply { addView(view) })
+            .setPositiveButton("Close", null)
+            .show()
+    }
+
+    private fun scheduleCooldownReminder() {
+        if (android.os.Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 7303)
+            status.text = "Allow notifications, then schedule the reminder again."
+            return
+        }
+        val input = EditText(this).apply {
+            hint = "Minutes from now (1–1440)"
+            setSingleLine(true)
+            setText("30")
+            inputType = InputType.TYPE_CLASS_NUMBER
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Schedule a cooldown reminder")
+            .setMessage("Schedule a reminder for a saved profile. The device may delay this inexact alarm to save power. When it arrives, the app asks you to review the workflow; it never starts automatically.")
+            .setView(input)
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Schedule") { _, _ ->
+                val minutes = input.text.toString().toLongOrNull()?.takeIf { it in 1L..1440L }
+                val profileName = profileInput.text.toString().trim()
+                if (minutes == null || profileName.isBlank() ||
+                    preferences.getString("workflow.$profileName", null) == null
+                ) {
+                    status.text = "Enter 1–1440 minutes and the exact name of an existing saved profile."
+                } else {
+                    val alarm = getSystemService(ALARM_SERVICE) as android.app.AlarmManager
+                    val intent = Intent(this, SchedulerReceiver::class.java)
+                        .putExtra("profile_name", profileName)
+                    val pending = android.app.PendingIntent.getBroadcast(
+                        this, SCHEDULER_REQUEST,
+                        intent,
+                        android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
+                    )
+                    val triggerAt = System.currentTimeMillis() + minutes * 60_000L
+                    getSharedPreferences("scheduler_state", MODE_PRIVATE).edit()
+                        .putString("profile_name", profileName)
+                        .putLong("trigger_at", triggerAt)
+                        .apply()
+                    alarm.setAndAllowWhileIdle(
+                        android.app.AlarmManager.RTC_WAKEUP,
+                        triggerAt,
+                        pending
+                    )
+                    status.text = "Reminder scheduled for profile '$profileName' in about $minutes minutes. Automation will require your confirmation."
+                }
+            }
+            .show()
+    }
+
     private fun addStep(step: WorkflowStep) {
         if (steps.size >= 50) {
             status.text = "Workflow limit reached: 50 steps."
@@ -390,8 +668,8 @@ class MainActivity : Activity() {
     }
 
     private fun confirmStart() {
-        if (steps.isEmpty()) {
-            status.text = "Add at least one workflow step first."
+        if (!WorkflowStep.validateStructure(steps)) {
+            status.text = "Complete every IF block with a matching END IF before running."
             return
         }
         val repeat = repeatInput.text.toString().toIntOrNull()
@@ -422,6 +700,10 @@ class MainActivity : Activity() {
         val name = profileInput.text.toString().trim()
         if (name.isEmpty() || steps.isEmpty()) {
             status.text = "Enter a profile name and add at least one step."
+            return
+        }
+        if (!WorkflowStep.validateStructure(steps)) {
+            status.text = "Complete every IF block with a matching END IF before saving."
             return
         }
         val encoded = steps.joinToString("\n") { it.encode() }
@@ -538,7 +820,11 @@ class MainActivity : Activity() {
             status.text = "Add at least one step before exporting."
             return
         }
-        pendingExport = (listOf("AIA_WORKFLOW_V1") + steps.map { it.encode() }).joinToString("\n")
+        if (!WorkflowStep.validateStructure(steps)) {
+            status.text = "Workflow has an unmatched IF / ELSE / END IF block. Fix it before exporting."
+            return
+        }
+        pendingExport = WorkflowJsonCodec.encode(steps)
         val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
             type = "text/plain"
@@ -691,10 +977,11 @@ class MainActivity : Activity() {
     }
 
     private fun decodeWorkflow(content: String): List<WorkflowStep>? {
+        if (content.trimStart().startsWith("{")) return WorkflowJsonCodec.decode(content)
         val lines = content.trim().lines()
         if (lines.size !in 2..51 || lines.first() != "AIA_WORKFLOW_V1") return null
         val decoded = lines.drop(1).map { WorkflowStep.decode(it) ?: return null }
-        return decoded.takeIf { it.isNotEmpty() && it.size <= 50 }
+        return decoded.takeIf { WorkflowStep.validateStructure(it) }
     }
 
     private fun replaceSteps(newSteps: List<WorkflowStep>) {
@@ -748,6 +1035,7 @@ class MainActivity : Activity() {
     )
 
     companion object {
+        private const val SCHEDULER_REQUEST = 7301
         private const val REQUEST_EXPORT = 4101
         private const val REQUEST_IMPORT = 4102
         private const val REQUEST_TEMPLATE = 4103

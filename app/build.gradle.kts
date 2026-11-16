@@ -28,4 +28,5 @@ android {
 dependencies {
     implementation("com.google.mlkit:text-recognition:16.0.1")
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
+    implementation("org.opencv:opencv:4.10.0")
 }

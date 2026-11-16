@@ -4,7 +4,9 @@ import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
 import android.graphics.Bitmap
 import android.graphics.Color
+import android.graphics.BitmapFactory
 import android.graphics.Path
+import android.graphics.Rect
 import android.graphics.PixelFormat
 import android.os.Handler
 import android.os.Looper
@@ -17,6 +19,7 @@ import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.widget.Button
 import android.widget.FrameLayout
+import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import com.google.mlkit.vision.common.InputImage
@@ -38,10 +41,18 @@ class AutomationAccessibilityService : AccessibilityService() {
     private var pointPickerView: View? = null
     private var pointPickerTarget: String? = null
     private var ocrCaptureRunnable: Runnable? = null
+    private var cloudAnalysisRunnable: Runnable? = null
+    private var templateLearningRunnable: Runnable? = null
     private var conditionPollRunnable: Runnable? = null
     private var conditionDeadline = 0L
     private var conditionCaptureInFlight = false
     private var workflowGeneration = 0L
+    private var paused = false
+    private var dashboardView: View? = null
+    private var dashboardStatus: TextView? = null
+    private var watchdogRunnable: Runnable? = null
+    private var lastScreenHash: Long? = null
+    private var stagnantSamples = 0
 
     override fun onServiceConnected() {
         super.onServiceConnected()
@@ -54,18 +65,23 @@ class AutomationAccessibilityService : AccessibilityService() {
         stopSequence()
         cancelPointPicker()
         cancelOcrCapture()
+        cancelGeminiAnalysis()
+        cancelTemplateLearning()
     }
 
     override fun onDestroy() {
         stopSequence()
         cancelPointPicker()
         cancelOcrCapture()
+        cancelGeminiAnalysis()
+        cancelTemplateLearning()
+        removeDashboard()
         if (instance === this) instance = null
         super.onDestroy()
     }
 
     private fun executeNextStep() {
-        if (!running) return
+        if (!running || paused) return
         if (stepIndex >= steps.size) {
             repeatIndex++
             if (repeatIndex >= repeatLimit) {
@@ -94,12 +110,24 @@ class AutomationAccessibilityService : AccessibilityService() {
             }
             is WorkflowStep.WaitForText -> beginTextCondition(step)
             is WorkflowStep.WaitForImage -> beginImageCondition(step)
-            is WorkflowStep.Tap -> dispatchStroke(
-                step.x, step.y, step.x, step.y, step.durationMs
-            )
-            is WorkflowStep.Swipe -> dispatchStroke(
-                step.startX, step.startY, step.endX, step.endY, step.durationMs
-            )
+            is WorkflowStep.IfText -> evaluateTextBranch(step)
+            is WorkflowStep.IfImage -> evaluateImageBranch(step)
+            WorkflowStep.ElseBranch -> {
+                stepIndex = findEndIf(stepIndex) + 1
+                scheduleNextStep(STEP_GAP_MS)
+            }
+            WorkflowStep.EndIf -> {
+                stepIndex++
+                scheduleNextStep(STEP_GAP_MS)
+            }
+            is WorkflowStep.Tap -> {
+                scheduleWatchdog()
+                dispatchStroke(step.x, step.y, step.x, step.y, step.durationMs)
+            }
+            is WorkflowStep.Swipe -> {
+                scheduleWatchdog()
+                dispatchStroke(step.startX, step.startY, step.endX, step.endY, step.durationMs)
+            }
         }
     }
 
@@ -110,7 +138,7 @@ class AutomationAccessibilityService : AccessibilityService() {
     }
 
     private fun captureForTextCondition(condition: WorkflowStep.WaitForText) {
-        if (!running || conditionCaptureInFlight) return
+        if (!running || paused || conditionCaptureInFlight) return
         if (SystemClock.elapsedRealtime() >= conditionDeadline) {
             stopSequence()
             Toast.makeText(this, "Text condition timed out. Workflow stopped.", Toast.LENGTH_LONG).show()
@@ -140,7 +168,7 @@ class AutomationAccessibilityService : AccessibilityService() {
                     val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
                     recognizer.process(InputImage.fromBitmap(bitmap, 0))
                         .addOnSuccessListener { result ->
-                            if (!running || captureGeneration != workflowGeneration) return@addOnSuccessListener
+                            if (!running || paused || captureGeneration != workflowGeneration) return@addOnSuccessListener
                             conditionCaptureInFlight = false
                             if (SystemClock.elapsedRealtime() >= conditionDeadline) {
                                 stopSequence()
@@ -185,7 +213,7 @@ class AutomationAccessibilityService : AccessibilityService() {
     }
 
     private fun scheduleConditionPoll(condition: WorkflowStep.WaitForText) {
-        if (!running) return
+        if (!running || paused) return
         if (SystemClock.elapsedRealtime() >= conditionDeadline) {
             stopSequence()
             Toast.makeText(this, "Text condition timed out. Workflow stopped.", Toast.LENGTH_LONG).show()
@@ -206,7 +234,7 @@ class AutomationAccessibilityService : AccessibilityService() {
     }
 
     private fun captureForImageCondition(condition: WorkflowStep.WaitForImage) {
-        if (!running || conditionCaptureInFlight) return
+        if (!running || paused || conditionCaptureInFlight) return
         if (SystemClock.elapsedRealtime() >= conditionDeadline) {
             stopSequence()
             Toast.makeText(this, "Image condition timed out. Workflow stopped.", Toast.LENGTH_LONG).show()
@@ -245,7 +273,12 @@ class AutomationAccessibilityService : AccessibilityService() {
                     }
                     Thread {
                         val result = try {
-                            LocalImageMatcher.match(screen, template, condition.threshold)
+                            val native = OpenCvImageMatcher.match(screen, template, condition.threshold)
+                            if (native != null) {
+                                LocalImageMatcher.Result(native.confidence >= condition.threshold, native.confidence)
+                            } else {
+                                LocalImageMatcher.match(screen, template, condition.threshold)
+                            }
                         } catch (_: Exception) {
                             LocalImageMatcher.Result(false, 0f)
                         } finally {
@@ -253,7 +286,7 @@ class AutomationAccessibilityService : AccessibilityService() {
                             template.recycle()
                         }
                         handler.post {
-                            if (!running || captureGeneration != workflowGeneration) return@post
+                            if (!running || paused || captureGeneration != workflowGeneration) return@post
                             conditionCaptureInFlight = false
                             if (SystemClock.elapsedRealtime() >= conditionDeadline) {
                                 stopSequence()
@@ -285,7 +318,7 @@ class AutomationAccessibilityService : AccessibilityService() {
     }
 
     private fun scheduleImagePoll(condition: WorkflowStep.WaitForImage) {
-        if (!running) return
+        if (!running || paused) return
         if (SystemClock.elapsedRealtime() >= conditionDeadline) {
             stopSequence()
             Toast.makeText(this, "Image condition timed out. Workflow stopped.", Toast.LENGTH_LONG).show()
@@ -297,6 +330,147 @@ class AutomationAccessibilityService : AccessibilityService() {
             captureForImageCondition(condition)
         }
         handler.postDelayed(conditionPollRunnable!!, condition.pollIntervalMs)
+    }
+
+    private fun evaluateTextBranch(condition: WorkflowStep.IfText) {
+        if (conditionCaptureInFlight) return
+        conditionCaptureInFlight = true
+        val generation = workflowGeneration
+        try {
+            takeScreenshot(Display.DEFAULT_DISPLAY, mainExecutor, object : TakeScreenshotCallback {
+                override fun onSuccess(screenshot: ScreenshotResult) {
+                    val buffer = screenshot.hardwareBuffer
+                    val bitmap = try {
+                        Bitmap.wrapHardwareBuffer(buffer, screenshot.colorSpace)?.copy(Bitmap.Config.ARGB_8888, false)
+                    } catch (_: Exception) { null } finally { buffer.close() }
+                    if (bitmap == null) {
+                        if (running && generation == workflowGeneration) {
+                            conditionCaptureInFlight = false
+                            stopSequence()
+                            Toast.makeText(this@AutomationAccessibilityService, "IF text screenshot unavailable; workflow stopped.", Toast.LENGTH_LONG).show()
+                        }
+                        return
+                    }
+                    val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+                    recognizer.process(InputImage.fromBitmap(bitmap, 0))
+                        .addOnSuccessListener { result ->
+                            if (!running || generation != workflowGeneration) return@addOnSuccessListener
+                            conditionCaptureInFlight = false
+                            applyBranchResult(result.text.contains(condition.text, ignoreCase = true))
+                        }
+                        .addOnFailureListener {
+                            if (running && generation == workflowGeneration) {
+                                conditionCaptureInFlight = false
+                                stopSequence()
+                                Toast.makeText(this@AutomationAccessibilityService, "IF text recognition failed.", Toast.LENGTH_LONG).show()
+                            }
+                        }
+                        .addOnCompleteListener { bitmap.recycle(); recognizer.close() }
+                }
+
+                override fun onFailure(errorCode: Int) {
+                    if (!running || generation != workflowGeneration) return
+                    conditionCaptureInFlight = false
+                    stopSequence()
+                    Toast.makeText(this@AutomationAccessibilityService, "IF text screenshot blocked ($errorCode).", Toast.LENGTH_LONG).show()
+                }
+            })
+        } catch (_: Exception) {
+            conditionCaptureInFlight = false
+            stopSequence()
+        }
+    }
+
+    private fun evaluateImageBranch(condition: WorkflowStep.IfImage) {
+        if (conditionCaptureInFlight) return
+        conditionCaptureInFlight = true
+        val generation = workflowGeneration
+        try {
+            takeScreenshot(Display.DEFAULT_DISPLAY, mainExecutor, object : TakeScreenshotCallback {
+                override fun onSuccess(screenshot: ScreenshotResult) {
+                    val buffer = screenshot.hardwareBuffer
+                    val screen = try {
+                        Bitmap.wrapHardwareBuffer(buffer, screenshot.colorSpace)?.copy(Bitmap.Config.ARGB_8888, false)
+                    } catch (_: Exception) { null } finally { buffer.close() }
+                    if (screen == null) {
+                        if (running && generation == workflowGeneration) {
+                            conditionCaptureInFlight = false
+                            stopSequence()
+                        }
+                        return
+                    }
+                    val template = TemplateStore.load(this@AutomationAccessibilityService, condition.template)
+                    if (template == null) {
+                        screen.recycle()
+                        if (running && generation == workflowGeneration) {
+                            conditionCaptureInFlight = false
+                            stopSequence()
+                            Toast.makeText(this@AutomationAccessibilityService, "IF image template is missing.", Toast.LENGTH_LONG).show()
+                        }
+                        return
+                    }
+                    Thread {
+                        val matched = try {
+                            val native = OpenCvImageMatcher.match(screen, template, condition.threshold)
+                            native?.confidence?.let { it >= condition.threshold }
+                                ?: LocalImageMatcher.match(screen, template, condition.threshold).matched
+                        } catch (_: Exception) {
+                            try { LocalImageMatcher.match(screen, template, condition.threshold).matched } catch (_: Exception) { false }
+                        } finally {
+                            screen.recycle()
+                            template.recycle()
+                        }
+                        handler.post {
+                            if (!running || generation != workflowGeneration) return@post
+                            conditionCaptureInFlight = false
+                            applyBranchResult(matched)
+                        }
+                    }.start()
+                }
+
+                override fun onFailure(errorCode: Int) {
+                    if (!running || generation != workflowGeneration) return
+                    conditionCaptureInFlight = false
+                    stopSequence()
+                    Toast.makeText(this@AutomationAccessibilityService, "IF image screenshot blocked ($errorCode).", Toast.LENGTH_LONG).show()
+                }
+            })
+        } catch (_: Exception) {
+            conditionCaptureInFlight = false
+            stopSequence()
+        }
+    }
+
+    private fun applyBranchResult(matched: Boolean) {
+        if (paused) return
+        val current = stepIndex
+        stepIndex = if (matched) current + 1 else findFalseBranchTarget(current)
+        scheduleNextStep(STEP_GAP_MS)
+    }
+
+    private fun findFalseBranchTarget(ifIndex: Int): Int {
+        var depth = 0
+        for (i in ifIndex + 1 until steps.size) {
+            when (steps[i]) {
+                is WorkflowStep.IfText, is WorkflowStep.IfImage -> depth++
+                WorkflowStep.EndIf -> if (depth == 0) return i + 1 else depth--
+                WorkflowStep.ElseBranch -> if (depth == 0) return i + 1
+                else -> Unit
+            }
+        }
+        return steps.size
+    }
+
+    private fun findEndIf(elseIndex: Int): Int {
+        var depth = 0
+        for (i in elseIndex + 1 until steps.size) {
+            when (steps[i]) {
+                is WorkflowStep.IfText, is WorkflowStep.IfImage -> depth++
+                WorkflowStep.EndIf -> if (depth == 0) return i else depth--
+                else -> Unit
+            }
+        }
+        return steps.lastIndex
     }
 
     private fun dispatchStroke(
@@ -322,7 +496,9 @@ class AutomationAccessibilityService : AccessibilityService() {
             override fun onCompleted(gestureDescription: GestureDescription?) {
                 if (!running) return
                 stepIndex++
-                scheduleNextStep(STEP_GAP_MS)
+                updateDashboard()
+                if (!paused) scheduleNextStep(STEP_GAP_MS)
+                scheduleWatchdog()
             }
 
             override fun onCancelled(gestureDescription: GestureDescription?) {
@@ -339,12 +515,18 @@ class AutomationAccessibilityService : AccessibilityService() {
             sequenceRunnable = null
             executeNextStep()
         }
-        handler.postDelayed(sequenceRunnable!!, delayMs)
+        if (!paused) handler.postDelayed(sequenceRunnable!!, delayMs)
     }
 
     private fun stopSequence() {
         workflowGeneration++
         running = false
+        paused = false
+        watchdogRunnable?.let(handler::removeCallbacks)
+        watchdogRunnable = null
+        lastScreenHash = null
+        stagnantSamples = 0
+        updateDashboard()
         startRunnable?.let(handler::removeCallbacks)
         startRunnable = null
         sequenceRunnable?.let(handler::removeCallbacks)
@@ -355,11 +537,155 @@ class AutomationAccessibilityService : AccessibilityService() {
         conditionDeadline = 0L
         steps = emptyList()
         workflowQueue = emptyList()
+        AutomationForegroundService.stop(this)
         queueIndex = 0
         stepIndex = 0
         repeatIndex = 0
     }
 
+
+    private fun showDashboard() {
+        if (dashboardView != null) return
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(14, 10, 14, 10)
+            setBackgroundColor(0xEE202938.toInt())
+        }
+        dashboardStatus = TextView(this).apply {
+            text = "Automation ready"
+            textSize = 13f
+            setTextColor(Color.WHITE)
+        }
+        panel.addView(dashboardStatus)
+        panel.addView(Button(this).apply {
+            text = "Pause / Resume"
+            setOnClickListener {
+                if (paused) resumeSequence() else pauseSequence()
+            }
+        })
+        panel.addView(Button(this).apply {
+            text = "Stop"
+            setOnClickListener {
+                stopSequence()
+                Toast.makeText(this@AutomationAccessibilityService, "Workflow stopped.", Toast.LENGTH_SHORT).show()
+            }
+        })
+        panel.addView(Button(this).apply {
+            text = "Hide dashboard"
+            setOnClickListener { removeDashboard() }
+        })
+        val params = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+            PixelFormat.TRANSLUCENT
+        ).apply { gravity = Gravity.TOP or Gravity.END }
+        try {
+            (getSystemService(WINDOW_SERVICE) as WindowManager).addView(panel, params)
+            dashboardView = panel
+            updateDashboard()
+        } catch (_: Exception) {
+            dashboardView = null
+            dashboardStatus = null
+            Toast.makeText(this, "Floating dashboard could not be shown on this device.", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun updateDashboard() {
+        dashboardStatus?.text = when {
+            !running -> "Automation stopped"
+            paused -> "Automation paused"
+            else -> "Running profile ${queueIndex + 1}/${workflowQueue.size.coerceAtLeast(1)} • step ${stepIndex + 1}/${steps.size}"
+        }
+    }
+
+    private fun removeDashboard() {
+        val view = dashboardView ?: return
+        dashboardView = null
+        dashboardStatus = null
+        try {
+            (getSystemService(WINDOW_SERVICE) as WindowManager).removeView(view)
+        } catch (_: Exception) { }
+    }
+
+    private fun pauseSequence() {
+        if (!running || paused) return
+        paused = true
+        sequenceRunnable?.let(handler::removeCallbacks)
+        sequenceRunnable = null
+        conditionPollRunnable?.let(handler::removeCallbacks)
+        conditionPollRunnable = null
+        watchdogRunnable?.let(handler::removeCallbacks)
+        watchdogRunnable = null
+        updateDashboard()
+        Toast.makeText(this, "Workflow paused. Use the dashboard to resume.", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun resumeSequence() {
+        if (!running || !paused) return
+        paused = false
+        updateDashboard()
+        scheduleNextStep(0L)
+        scheduleWatchdog()
+    }
+
+    private fun scheduleWatchdog() {
+        watchdogRunnable?.let(handler::removeCallbacks)
+        if (!running || paused || stepIndex !in steps.indices ||
+            (steps[stepIndex] !is WorkflowStep.Tap && steps[stepIndex] !is WorkflowStep.Swipe)
+        ) return
+        watchdogRunnable = Runnable {
+            watchdogRunnable = null
+            if (!running || paused) return@Runnable
+            captureWatchdogFrame()
+        }
+        handler.postDelayed(watchdogRunnable!!, WATCHDOG_INTERVAL_MS)
+    }
+
+    private fun captureWatchdogFrame() {
+        if (!running || paused) return
+        try {
+            takeScreenshot(Display.DEFAULT_DISPLAY, mainExecutor, object : TakeScreenshotCallback {
+                override fun onSuccess(screenshot: ScreenshotResult) {
+                    val buffer = screenshot.hardwareBuffer
+                    val bitmap = try {
+                        Bitmap.wrapHardwareBuffer(buffer, screenshot.colorSpace)?.copy(Bitmap.Config.ARGB_8888, false)
+                    } catch (_: Exception) { null } finally { buffer.close() }
+                    if (bitmap == null) {
+                        scheduleWatchdog()
+                        return
+                    }
+                    Thread {
+                        val hash = try { PerceptualHash.compute(bitmap) } catch (_: Exception) { null }
+                        bitmap.recycle()
+                        handler.post {
+                            if (!running || paused || hash == null) return@post
+                            val previous = lastScreenHash
+                            if (previous != null && PerceptualHash.distance(previous, hash) <= WATCHDOG_HASH_DISTANCE) {
+                                stagnantSamples++
+                            } else {
+                                stagnantSamples = 0
+                            }
+                            lastScreenHash = hash
+                            if (stagnantSamples >= WATCHDOG_STAGNANT_LIMIT) {
+                                pauseSequence()
+                                Toast.makeText(this@AutomationAccessibilityService, "Screen appears unchanged. Workflow paused for review.", Toast.LENGTH_LONG).show()
+                            } else {
+                                scheduleWatchdog()
+                            }
+                        }
+                    }.start()
+                }
+
+                override fun onFailure(errorCode: Int) {
+                    scheduleWatchdog()
+                }
+            })
+        } catch (_: Exception) {
+            scheduleWatchdog()
+        }
+    }
 
     private fun captureScreenForOcr() {
         ocrCaptureRunnable = null
@@ -409,6 +735,117 @@ class AutomationAccessibilityService : AccessibilityService() {
         } catch (error: Exception) {
             saveOcrResult("Screen capture failed: ${error.localizedMessage ?: "unknown error"}")
         }
+    }
+
+    private fun captureTemplateRegion(name: String, left: Int, top: Int, right: Int, bottom: Int) {
+        templateLearningRunnable = null
+        try {
+            takeScreenshot(Display.DEFAULT_DISPLAY, mainExecutor, object : TakeScreenshotCallback {
+                override fun onSuccess(screenshot: ScreenshotResult) {
+                    val buffer = screenshot.hardwareBuffer
+                    val screen = try {
+                        Bitmap.wrapHardwareBuffer(buffer, screenshot.colorSpace)?.copy(Bitmap.Config.ARGB_8888, false)
+                    } catch (_: Exception) { null } finally { buffer.close() }
+                    if (screen == null) {
+                        Toast.makeText(this@AutomationAccessibilityService, "Could not capture screen for template learning.", Toast.LENGTH_LONG).show()
+                        return
+                    }
+                    val x1 = left.coerceIn(0, screen.width)
+                    val y1 = top.coerceIn(0, screen.height)
+                    val x2 = right.coerceIn(0, screen.width)
+                    val y2 = bottom.coerceIn(0, screen.height)
+                    val cropLeft = minOf(x1, x2)
+                    val cropTop = minOf(y1, y2)
+                    val cropWidth = kotlin.math.abs(x2 - x1)
+                    val cropHeight = kotlin.math.abs(y2 - y1)
+                    if (cropWidth < 8 || cropHeight < 8) {
+                        screen.recycle()
+                        Toast.makeText(this@AutomationAccessibilityService, "Selected template region is too small or outside the screen.", Toast.LENGTH_LONG).show()
+                        return
+                    }
+                    val crop = Bitmap.createBitmap(screen, cropLeft, cropTop, cropWidth, cropHeight)
+                    screen.recycle()
+                    try {
+                        TemplateStore.saveBitmap(this@AutomationAccessibilityService, crop, name)
+                        Toast.makeText(this@AutomationAccessibilityService, "Template learned locally: $name", Toast.LENGTH_LONG).show()
+                    } catch (error: Exception) {
+                        Toast.makeText(this@AutomationAccessibilityService, "Template could not be saved: ${error.localizedMessage ?: "storage error"}", Toast.LENGTH_LONG).show()
+                    } finally {
+                        crop.recycle()
+                    }
+                }
+
+                override fun onFailure(errorCode: Int) {
+                    Toast.makeText(this@AutomationAccessibilityService, "Screen capture blocked ($errorCode); no template saved.", Toast.LENGTH_LONG).show()
+                }
+            })
+        } catch (error: Exception) {
+            Toast.makeText(this, "Template capture failed: ${error.localizedMessage ?: "unknown error"}", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun cancelTemplateLearning() {
+        templateLearningRunnable?.let(handler::removeCallbacks)
+        templateLearningRunnable = null
+    }
+
+    private fun captureScreenForGeminiAnalysis() {
+        cloudAnalysisRunnable = null
+        val key = try { CloudKeyStore.read(this) } catch (_: Exception) { null }
+        if (key.isNullOrBlank()) {
+            saveGeminiAnalysis("No Gemini API key is configured.")
+            return
+        }
+        try {
+            takeScreenshot(Display.DEFAULT_DISPLAY, mainExecutor, object : TakeScreenshotCallback {
+                override fun onSuccess(screenshot: ScreenshotResult) {
+                    val buffer = screenshot.hardwareBuffer
+                    val bitmap = try {
+                        Bitmap.wrapHardwareBuffer(buffer, screenshot.colorSpace)?.copy(Bitmap.Config.ARGB_8888, false)
+                    } catch (_: Exception) { null } finally { buffer.close() }
+                    if (bitmap == null) {
+                        saveGeminiAnalysis("Could not prepare the screenshot. It was not uploaded.")
+                        return
+                    }
+                    Thread {
+                        val result = try {
+                            GeminiCloudClient.analyzeImage(
+                                this@AutomationAccessibilityService,
+                                key,
+                                "Analyze this user-authorized Android screenshot. Return concise JSON with keys summary, visible_controls, possible_blocker, suggested_next_step. Describe only visible UI. Do not invent details, do not provide coordinates or gesture commands, and do not claim to have changed the device.",
+                                bitmap
+                            ).text
+                        } catch (error: Exception) {
+                            "Gemini analysis unavailable: ${error.localizedMessage ?: "request failed"}"
+                        } finally {
+                            bitmap.recycle()
+                        }
+                        saveGeminiAnalysis(result)
+                    }.start()
+                }
+
+                override fun onFailure(errorCode: Int) {
+                    saveGeminiAnalysis("Screenshot blocked or unavailable ($errorCode). Nothing was uploaded.")
+                }
+            })
+        } catch (error: Exception) {
+            saveGeminiAnalysis("Screenshot capture failed: ${error.localizedMessage ?: "unknown error"}")
+        }
+    }
+
+    private fun saveGeminiAnalysis(text: String) {
+        getSharedPreferences(GEMINI_RESULT_PREFS, MODE_PRIVATE).edit()
+            .putString("result", text.take(12_000))
+            .putBoolean("ready", true)
+            .apply()
+        handler.post {
+            Toast.makeText(this, "Gemini visual analysis finished. Return to the app to review it.", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun cancelGeminiAnalysis() {
+        cloudAnalysisRunnable?.let(handler::removeCallbacks)
+        cloudAnalysisRunnable = null
     }
 
     private fun saveOcrResult(text: String) {
@@ -530,8 +967,12 @@ class AutomationAccessibilityService : AccessibilityService() {
         private const val POINT_PICKER_DELAY_MS = 10_000L
         private const val POINT_PICKER_PREFS = "point_picker"
         private const val OCR_PREFS = "ocr_results"
+        private const val GEMINI_RESULT_PREFS = "gemini_visual_result"
         private const val OCR_CAPTURE_DELAY_MS = 8_000L
         private const val MAX_OCR_RESULT_CHARS = 30_000
+        private const val WATCHDOG_INTERVAL_MS = 12_000L
+        private const val WATCHDOG_STAGNANT_LIMIT = 3
+        private const val WATCHDOG_HASH_DISTANCE = 2
 
         @Volatile private var instance: AutomationAccessibilityService? = null
 
@@ -543,11 +984,13 @@ class AutomationAccessibilityService : AccessibilityService() {
         fun startQueue(workflows: List<List<WorkflowStep>>, repeatCount: Int): Boolean {
             val service = instance ?: return false
             if (workflows.isEmpty() || workflows.size > 20 || repeatCount !in 1..20 ||
-                workflows.any { it.isEmpty() || it.size > 50 }
+                workflows.any { !WorkflowStep.validateStructure(it) }
             ) return false
 
             service.cancelPointPicker()
             service.cancelOcrCapture()
+            service.cancelGeminiAnalysis()
+            service.cancelTemplateLearning()
             service.stopSequence()
             service.workflowQueue = workflows.map { it.toList() }
             service.queueIndex = 0
@@ -556,6 +999,16 @@ class AutomationAccessibilityService : AccessibilityService() {
             service.repeatLimit = repeatCount
             service.repeatIndex = 0
             service.running = true
+            service.paused = false
+            try {
+                AutomationForegroundService.start(service)
+            } catch (_: Exception) {
+                service.stopSequence()
+                return false
+            }
+            service.showDashboard()
+            service.updateDashboard()
+            service.scheduleWatchdog()
             service.startRunnable = Runnable {
                 service.startRunnable = null
                 if (service.running) service.executeNextStep()
@@ -564,10 +1017,50 @@ class AutomationAccessibilityService : AccessibilityService() {
             return true
         }
 
+        fun armTemplateLearning(name: String, x1: Int, y1: Int, x2: Int, y2: Int): Boolean {
+            val service = instance ?: return false
+            if (!name.matches(Regex("[A-Za-z0-9_-]{1,40}")) ||
+                minOf(x1, x2) < 0 || minOf(y1, y2) < 0 ||
+                kotlin.math.abs(x2 - x1) < 8 || kotlin.math.abs(y2 - y1) < 8
+            ) return false
+            service.cancelTemplateLearning()
+            service.cancelPointPicker()
+            service.cancelOcrCapture()
+            service.cancelGeminiAnalysis()
+            service.stopSequence()
+            Toast.makeText(service, "Switch to the intended screen. The selected rectangle will be saved locally in 8 seconds.", Toast.LENGTH_LONG).show()
+            service.templateLearningRunnable = Runnable {
+                service.captureTemplateRegion(name, x1, y1, x2, y2)
+            }
+            service.handler.postDelayed(service.templateLearningRunnable!!, OCR_CAPTURE_DELAY_MS)
+            return true
+        }
+
+        fun armGeminiAnalysis(): Boolean {
+            val service = instance ?: return false
+            val key = try { CloudKeyStore.read(service) } catch (_: Exception) { null }
+            if (key.isNullOrBlank()) return false
+            service.cancelPointPicker()
+            service.cancelOcrCapture()
+            service.cancelTemplateLearning()
+            service.cancelGeminiAnalysis()
+            service.stopSequence()
+            service.getSharedPreferences(GEMINI_RESULT_PREFS, MODE_PRIVATE).edit().clear().apply()
+            Toast.makeText(service, "Switch to the screen you explicitly approved for cloud analysis. One screenshot will be sent to Gemini in 8 seconds.", Toast.LENGTH_LONG).show()
+            service.cloudAnalysisRunnable = Runnable {
+                service.cloudAnalysisRunnable = null
+                service.captureScreenForGeminiAnalysis()
+            }
+            service.handler.postDelayed(service.cloudAnalysisRunnable!!, OCR_CAPTURE_DELAY_MS)
+            return true
+        }
+
         fun armOcrCapture(): Boolean {
             val service = instance ?: return false
             service.cancelPointPicker()
             service.cancelOcrCapture()
+            service.cancelGeminiAnalysis()
+            service.cancelTemplateLearning()
             service.stopSequence()
             service.getSharedPreferences(OCR_PREFS, MODE_PRIVATE).edit()
                 .remove("result")
@@ -591,6 +1084,8 @@ class AutomationAccessibilityService : AccessibilityService() {
             if (target !in setOf("tap", "swipe_start", "swipe_end")) return false
             service.cancelPointPicker()
             service.cancelOcrCapture()
+            service.cancelGeminiAnalysis()
+            service.cancelTemplateLearning()
             service.stopSequence()
             service.pointPickerTarget = target
             Toast.makeText(
@@ -603,11 +1098,20 @@ class AutomationAccessibilityService : AccessibilityService() {
             return true
         }
 
+        fun pauseOrResume(): Boolean {
+            val service = instance ?: return false
+            if (!service.running) return false
+            if (service.paused) service.resumeSequence() else service.pauseSequence()
+            return true
+        }
+
         fun stop() {
             instance?.let {
                 it.stopSequence()
                 it.cancelPointPicker()
                 it.cancelOcrCapture()
+                it.cancelGeminiAnalysis()
+                it.cancelTemplateLearning()
             }
         }
     }
