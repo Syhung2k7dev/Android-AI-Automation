@@ -560,6 +560,7 @@ class MainActivity : Activity() {
         super.onActivityResult(requestCode, resultCode, data)
         if (resultCode != RESULT_OK || data?.data == null) {
             pendingExport = null
+            pendingTemplateName = null
             return
         }
         val uri = data.data ?: return
