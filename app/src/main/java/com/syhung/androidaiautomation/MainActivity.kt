@@ -717,6 +717,7 @@ class MainActivity : Activity() {
                     }
                     return@setPositiveButton
                 }
+                val intervalMinutes = minutes ?: return@setPositiveButton
                 val alarm = getSystemService(ALARM_SERVICE) as android.app.AlarmManager
                 val intent = Intent(this, SchedulerReceiver::class.java)
                     .putExtra("profile_name", profileName)
