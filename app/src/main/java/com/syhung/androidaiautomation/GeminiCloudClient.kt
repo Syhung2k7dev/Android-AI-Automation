@@ -58,6 +58,27 @@ object GeminiCloudClient {
         return corrected
     }
 
+    fun generateWorkflowDraft(context: Context, apiKey: String, goal: String): List<WorkflowStep> {
+        require(goal.isNotBlank() && goal.length <= 1_000)
+        val prompt = """
+            Create a draft Android UI workflow for this user goal: $goal
+            Return only a JSON object in format AIA_WORKFLOW version 2 with a steps array.
+            Allowed step objects:
+            tap: {"type":"tap","x":540,"y":900,"durationMs":300}
+            swipe: {"type":"swipe","startX":540,"startY":900,"endX":540,"endY":500,"durationMs":400}
+            wait: {"type":"wait","durationMs":1000}
+            waitForText: {"type":"waitForText","text":"Ready","timeoutMs":30000,"pollIntervalMs":2000}
+            ifText: {"type":"ifText","text":"Success"}
+            else: {"type":"else"}
+            endIf: {"type":"endIf"}
+            Constraints: 1 to 50 steps; coordinates 0..20000; tap/swipe duration 50..10000 ms; wait 100..60000 ms; condition timeout 1000..120000 ms; poll 1000..10000 ms. Use no image conditions because no template catalog was provided. Keep nested IF blocks balanced. Do not include markdown or explanations.
+            The workflow is a draft only. Do not claim to have executed it.
+        """.trimIndent()
+        val reply = askInternal(context, apiKey, prompt, null, true)
+        return WorkflowJsonCodec.decode(reply.text)
+            ?: throw IOException("Gemini did not return a valid workflow JSON draft.")
+    }
+
     private fun askInternal(context: Context, apiKey: String, prompt: String, image: Bitmap?, forceJson: Boolean): GeminiReply {
         require(prompt.isNotBlank() && prompt.length <= 4_000)
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
