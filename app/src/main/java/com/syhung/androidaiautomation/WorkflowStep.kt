@@ -11,12 +11,14 @@ sealed class WorkflowStep {
     ) : WorkflowStep()
     data class Wait(val durationMs: Long) : WorkflowStep()
     data class WaitForText(val text: String, val timeoutMs: Long, val pollIntervalMs: Long) : WorkflowStep()
+    data class WaitForImage(val template: String, val timeoutMs: Long, val pollIntervalMs: Long, val threshold: Float) : WorkflowStep()
 
     fun displayText(): String = when (this) {
         is Tap -> "Tap (${x.toInt()}, ${y.toInt()})"
         is Swipe -> "Swipe (${startX.toInt()}, ${startY.toInt()}) to (${endX.toInt()}, ${endY.toInt()})"
         is Wait -> "Wait ${durationMs} ms"
         is WaitForText -> "Wait for text: '$text' (timeout ${timeoutMs} ms)"
+        is WaitForImage -> "Wait for image: '$template' (threshold $threshold, timeout ${timeoutMs} ms)"
     }
 
     fun encode(): String = when (this) {
@@ -24,6 +26,7 @@ sealed class WorkflowStep {
         is Swipe -> "S|$startX|$startY|$endX|$endY|$durationMs"
         is Wait -> "W|$durationMs"
         is WaitForText -> "C|$text|$timeoutMs|$pollIntervalMs"
+        is WaitForImage -> "I|$template|$timeoutMs|$pollIntervalMs|$threshold"
     }
 
     companion object {
@@ -63,6 +66,17 @@ sealed class WorkflowStep {
                         timeout != null && timeout in 1_000L..120_000L &&
                         poll != null && poll in 1_000L..10_000L && poll <= timeout
                     ) WaitForText(text, timeout, poll) else null
+                } else null
+                "I" -> if (parts.size == 5) {
+                    val template = parts[1]
+                    val timeout = parts[2].toLongOrNull()
+                    val poll = parts[3].toLongOrNull()
+                    val threshold = parts[4].toFloatOrNull()
+                    if (template.matches(Regex("[A-Za-z0-9_-]{1,40}")) &&
+                        timeout != null && timeout in 1_000L..120_000L &&
+                        poll != null && poll in 1_000L..10_000L && poll <= timeout &&
+                        threshold != null && threshold.isFinite() && threshold in 0.50f..0.99f
+                    ) WaitForImage(template, timeout, poll, threshold) else null
                 } else null
                 else -> null
             }

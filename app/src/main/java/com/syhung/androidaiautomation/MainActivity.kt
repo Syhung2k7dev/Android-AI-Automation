@@ -26,6 +26,8 @@ class MainActivity : Activity() {
     private lateinit var waitInput: EditText
     private lateinit var repeatInput: EditText
     private lateinit var conditionTextInput: EditText
+    private lateinit var templateInput: EditText
+    private var pendingTemplateName: String? = null
     private lateinit var stepsView: TextView
     private val steps = mutableListOf<WorkflowStep>()
     private var pendingExport: String? = null
@@ -63,10 +65,11 @@ class MainActivity : Activity() {
         waitInput = field("Wait duration in ms (100–60000)", "1000")
         repeatInput = field("Repeat workflow (1–20)", "1")
         conditionTextInput = field("Wait until this text appears (max 80 characters)", "Ready")
+        templateInput = field("Image template name", "target_button")
 
         listOf(
             profileInput, xInput, yInput, endXInput, endYInput,
-            durationInput, waitInput, repeatInput, conditionTextInput
+            durationInput, waitInput, repeatInput, conditionTextInput, templateInput
         ).forEach { root.addView(it, matchWidth()) }
 
         root.addView(button("Select tap point visually") { armPointSelection("tap") }, matchWidth())
@@ -76,6 +79,9 @@ class MainActivity : Activity() {
         root.addView(button("Add swipe step") { addSwipe() }, matchWidth())
         root.addView(button("Add wait step") { addWait() }, matchWidth())
         root.addView(button("Add wait-for-text condition") { addWaitForText() }, matchWidth())
+        root.addView(button("Import image template") { importImageTemplate() }, matchWidth())
+        root.addView(button("Add wait-for-image condition") { addWaitForImage() }, matchWidth())
+        root.addView(button("Manage image templates") { manageImageTemplates() }, matchWidth())
         root.addView(button("Manage / reorder steps") { manageStep() }, matchWidth())
         root.addView(button("Clear workflow") {
             if (steps.isNotEmpty()) {
@@ -101,6 +107,7 @@ class MainActivity : Activity() {
         root.addView(button("Save workflow on this device") { saveProfile() }, matchWidth())
         root.addView(button("Load workflow") { loadProfile() }, matchWidth())
         root.addView(button("Saved workflow library") { manageSavedWorkflows() }, matchWidth())
+        root.addView(button("Run saved profile queue") { confirmProfileQueue() }, matchWidth())
         root.addView(button("Export workflow file") { exportWorkflow() }, matchWidth())
         root.addView(button("Import workflow file") { importWorkflow() }, matchWidth())
         root.addView(button("Read screen text offline") { confirmOcrCapture() }, matchWidth())
@@ -120,7 +127,7 @@ class MainActivity : Activity() {
         }, matchWidth())
 
         root.addView(TextView(this).apply {
-            text = "Local workflow editor: create, reorder, save, import and export tap, swipe, wait, and OCR text-condition steps. Use visual point selection to capture coordinates from an authorized screen. The picker opens after a 10-second switch window and temporarily intercepts one tap to record its position. Workflows stay on this device unless you explicitly export a file. Each run requires confirmation and has a 5-second countdown. Limit: 50 steps and 20 repeats. Screen text recognition is available only after a separate confirmation; it captures one screenshot and processes it locally with a bundled model. No cloud AI service is used."
+            text = "Local workflow editor: create, reorder, save, import and export tap, swipe, wait, OCR text conditions, and local image conditions. Use visual point selection to capture coordinates from an authorized screen. The picker opens after a 10-second switch window and temporarily intercepts one tap to record its position. Workflows stay on this device unless you explicitly export a file. Each run requires confirmation and has a 5-second countdown. Limit: 50 steps and 20 repeats. Screen text recognition and image matching run locally. Optional Gemini text requests require a saved API key and a separate user action; this build does not automatically upload screenshots or execute AI-generated actions."
             textSize = 13f
             setPadding(0, 18, 0, 0)
         }, matchWidth())
@@ -439,6 +446,47 @@ class MainActivity : Activity() {
     }
 
 
+    private fun confirmProfileQueue() {
+        val names = preferences.all.keys
+            .filter { it.startsWith("workflow.") }
+            .map { it.removePrefix("workflow.") }
+            .filter { it.isNotBlank() }
+            .sorted()
+        if (names.isEmpty()) {
+            status.text = "Save at least one workflow profile before starting a queue."
+            return
+        }
+        if (names.size > 20) {
+            status.text = "Profile queue is limited to 20 workflows. Remove or export extra profiles first."
+            return
+        }
+        val queue = names.mapNotNull { name ->
+            preferences.getString("workflow.$name", null)?.let(::decodeWorkflow)
+        }
+        if (queue.size != names.size || queue.any { it.isEmpty() }) {
+            status.text = "One or more saved profiles are invalid. Review them before running the queue."
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Confirm profile queue")
+            .setMessage(
+                "Run all ${names.size} saved profiles in alphabetical order, one after another?\n\n" +
+                    names.joinToString("\n") { "• $it" } +
+                    "\n\nThe queue starts after a 5-second delay. You can stop it at any time."
+            )
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Start queue") { _, _ ->
+                val repeat = repeatInput.text.toString().toIntOrNull()
+                    ?.takeIf { it in 1..20 } ?: 1
+                if (AutomationAccessibilityService.startQueue(queue, repeat)) {
+                    status.text = "Profile queue armed: ${names.size} workflows. Switch to the intended app."
+                } else {
+                    status.text = "Accessibility service is not connected or the queue is invalid."
+                }
+            }
+            .show()
+    }
+
     private fun manageSavedWorkflows() {
         val names = preferences.all.keys
             .filter { it.startsWith("workflow.") }
@@ -512,13 +560,88 @@ class MainActivity : Activity() {
         super.onActivityResult(requestCode, resultCode, data)
         if (resultCode != RESULT_OK || data?.data == null) {
             pendingExport = null
+            pendingTemplateName = null
             return
         }
         val uri = data.data ?: return
         when (requestCode) {
             REQUEST_EXPORT -> writeWorkflow(uri)
             REQUEST_IMPORT -> readWorkflow(uri)
+            REQUEST_TEMPLATE -> importTemplateFromUri(uri)
         }
+    }
+
+    private fun importImageTemplate() {
+        val name = templateInput.text.toString().trim()
+        if (!name.matches(Regex("[A-Za-z0-9_-]{1,40}"))) {
+            status.text = "Use a template name containing 1–40 letters, digits, underscores, or hyphens."
+            return
+        }
+        pendingTemplateName = name
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "image/*"
+        }
+        startActivityForResult(intent, REQUEST_TEMPLATE)
+    }
+
+    private fun importTemplateFromUri(uri: Uri) {
+        val name = pendingTemplateName ?: return
+        pendingTemplateName = null
+        try {
+            val saved = TemplateStore.import(this, uri, name)
+            status.text = "Image template saved locally: $saved"
+        } catch (error: Exception) {
+            status.text = "Image template import failed: ${error.localizedMessage ?: "invalid image"}"
+        }
+    }
+
+    private fun manageImageTemplates() {
+        val names = TemplateStore.names(this)
+        if (names.isEmpty()) {
+            status.text = "No image templates saved yet."
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Local image templates")
+            .setItems(names.toTypedArray()) { _, index ->
+                val name = names[index]
+                AlertDialog.Builder(this)
+                    .setTitle(name)
+                    .setItems(arrayOf("Use for image condition", "Delete template")) { _, action ->
+                        when (action) {
+                            0 -> {
+                                templateInput.setText(name)
+                                status.text = "Selected image template: $name"
+                            }
+                            1 -> AlertDialog.Builder(this)
+                                .setMessage("Delete local image template '$name'? Existing workflows using it will stop if the template is missing.")
+                                .setNegativeButton("Cancel", null)
+                                .setPositiveButton("Delete") { _, _ ->
+                                    TemplateStore.delete(this, name)
+                                    status.text = "Deleted image template: $name"
+                                }
+                                .show()
+                        }
+                    }
+                    .setNegativeButton("Close", null)
+                    .show()
+            }
+            .setNegativeButton("Close", null)
+            .show()
+    }
+
+    private fun addWaitForImage() {
+        val name = templateInput.text.toString().trim()
+        if (!name.matches(Regex("[A-Za-z0-9_-]{1,40}"))) {
+            status.text = "Enter a valid image template name."
+            return
+        }
+        if (name !in TemplateStore.names(this)) {
+            status.text = "Import this image template before adding its condition."
+            return
+        }
+        addStep(WorkflowStep.WaitForImage(name, 30_000L, 2_000L, 0.85f))
     }
 
     private fun writeWorkflow(uri: Uri) {
@@ -627,6 +750,7 @@ class MainActivity : Activity() {
     companion object {
         private const val REQUEST_EXPORT = 4101
         private const val REQUEST_IMPORT = 4102
+        private const val REQUEST_TEMPLATE = 4103
         private const val MAX_IMPORT_CHARS = 20_000
     }
 }

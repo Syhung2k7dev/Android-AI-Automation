@@ -5,7 +5,7 @@ An independent Android automation prototype built around explicit user control a
 ## Current implementation
 
 - Android Accessibility Service used for explicitly user-started tap and swipe gestures.
-- Multi-step workflow editor with tap, swipe, wait, and bounded OCR text-condition actions.
+- Multi-step workflow editor with tap, swipe, wait, bounded OCR text conditions, and local image-template conditions.
 - Visual coordinate picker for tap points and both swipe endpoints.
 - Reorder and delete individual workflow steps.
 - Save and load named workflows locally.
@@ -14,21 +14,21 @@ An independent Android automation prototype built around explicit user control a
 - Validation of imported step types, coordinates, durations, workflow size, and step count.
 - Explicit run confirmation, five-second start delay, finite repeats, and Stop control.
 - User-confirmed one-shot OCR plus workflow text conditions that poll screenshots locally until a configured phrase appears or the timeout expires.
-- OCR results are temporarily stored locally for display; the screenshot itself is not saved or uploaded.
+- OCR results are temporarily stored locally for display; screenshots used by local OCR and image matching are processed on-device and are not uploaded.
+- Local visual matching: import a user-selected image template, store it in app-private storage, and add a bounded wait-until-image-matches workflow step. Matching uses downscaled grayscale normalized cross-correlation on-device; it is not the OpenCV library.
 - Optional Gemini cloud foundation: API key stored with AndroidX encrypted preferences backed by Android Keystore, explicit connection test, bounded retries, persistent failure circuit breaker, and token/request counters.
 - Cloud API use is opt-in and explicit. The current integration tests text-only requests; it does not upload screenshots or automatically trigger cloud recovery.
 - Current workflow limits: 50 steps and 20 repeats.
 - OCR condition defaults: 30-second timeout, 2-second polling interval; both are bounded to avoid indefinite capture loops.
 
-This remains an early development build, not the complete product. OCR text conditions are implemented as bounded wait steps; image matching, branching, scheduling, and multi-account management are not yet implemented.
+This remains an early development build, not the complete product. OCR and basic local image conditions are implemented as bounded wait steps, and saved profiles can be queued sequentially after explicit confirmation. Branching, persistent scheduled timers, a dedicated foreground dashboard, and cloud visual recovery are not yet implemented. Queue execution requires the Accessibility Service to remain connected.
 
 ## Not implemented
 
-- Local image matching and image-based workflow conditions.
+- Advanced OpenCV-accelerated matching, multi-scale matching, and image-absence conditions.
 - OCR branching beyond the current wait-until-text-appears step.
 - Scheduling and foreground execution controls.
 - Screenshot-based Gemini recovery and structured workflow mutation are not yet implemented; the current cloud integration is a text-only connection foundation.
-- Multi-account workflow management.
 - Production release signing and distribution review.
 
 ## Platform target
@@ -67,7 +67,7 @@ The implementation is original and does not copy Smart AutoClicker's source. Any
 ## Roadmap
 
 1. Device compatibility and execution reliability checks.
-2. Local image matching and visual conditions.
+2. Advanced OpenCV-based image matching and visual conditions.
 3. Expand OCR conditions into explicit if/else branching.
 4. Scheduling with visible status and reliable cancellation.
 5. Optional, bounded AI-assisted recovery.
