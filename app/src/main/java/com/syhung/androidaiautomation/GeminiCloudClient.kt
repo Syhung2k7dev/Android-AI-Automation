@@ -58,6 +58,7 @@ object GeminiCloudClient {
         return corrected
     }
 
+    @Synchronized
     fun generateWorkflowDraft(context: Context, apiKey: String, goal: String): List<WorkflowStep> {
         require(goal.isNotBlank() && goal.length <= 1_000)
         val prompt = """
