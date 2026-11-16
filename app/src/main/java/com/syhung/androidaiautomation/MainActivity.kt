@@ -66,6 +66,9 @@ class MainActivity : Activity() {
             durationInput, waitInput, repeatInput
         ).forEach { root.addView(it, matchWidth()) }
 
+        root.addView(button("Select tap point visually") { armPointSelection("tap") }, matchWidth())
+        root.addView(button("Select swipe start visually") { armPointSelection("swipe_start") }, matchWidth())
+        root.addView(button("Select swipe end visually") { armPointSelection("swipe_end") }, matchWidth())
         root.addView(button("Add tap step") { addTap() }, matchWidth())
         root.addView(button("Add swipe step") { addSwipe() }, matchWidth())
         root.addView(button("Add wait step") { addWait() }, matchWidth())
@@ -106,7 +109,7 @@ class MainActivity : Activity() {
         }, matchWidth())
 
         root.addView(TextView(this).apply {
-            text = "Local workflow editor: create, reorder, save, import and export tap, swipe and wait steps. Workflows stay on this device unless you explicitly export a file. Each run requires confirmation and has a 5-second countdown. Limit: 50 steps and 20 repeats. This build does not read screen contents, use OCR, capture the screen or connect to a cloud AI service. Use only with apps and screens you are authorized to control."
+            text = "Local workflow editor: create, reorder, save, import and export tap, swipe and wait steps. Use visual point selection to capture coordinates from an authorized screen. The picker opens after a 10-second switch window and temporarily intercepts one tap to record its position. Workflows stay on this device unless you explicitly export a file. Each run requires confirmation and has a 5-second countdown. Limit: 50 steps and 20 repeats. This build does not read screen contents, use OCR, capture the screen or connect to a cloud AI service."
             textSize = 13f
             setPadding(0, 18, 0, 0)
         }, matchWidth())
@@ -117,7 +120,49 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
-        if (::status.isInitialized) refreshStatus()
+        if (::status.isInitialized) {
+            applyPickedPoint()
+            refreshStatus()
+        }
+    }
+
+    private fun armPointSelection(target: String) {
+        if (!AutomationAccessibilityService.armPointPicker(target)) {
+            status.text = "Enable the app's Accessibility service before selecting a point."
+            return
+        }
+        status.text = "Switch to the target app within 10 seconds. The next tap will be recorded as a coordinate."
+    }
+
+    private fun applyPickedPoint() {
+        val picked = getSharedPreferences("point_picker", MODE_PRIVATE)
+        if (!picked.getBoolean("selection_ready", false)) return
+
+        val x = picked.getFloat("selected_x", -1f)
+        val y = picked.getFloat("selected_y", -1f)
+        val target = picked.getString("selected_target", null)
+        if (x < 0f || y < 0f || target == null) {
+            picked.edit().putBoolean("selection_ready", false).apply()
+            status.text = "Point selection result was invalid."
+            return
+        }
+
+        when (target) {
+            "tap" -> {
+                xInput.setText(x.toInt().toString())
+                yInput.setText(y.toInt().toString())
+            }
+            "swipe_start" -> {
+                xInput.setText(x.toInt().toString())
+                yInput.setText(y.toInt().toString())
+            }
+            "swipe_end" -> {
+                endXInput.setText(x.toInt().toString())
+                endYInput.setText(y.toInt().toString())
+            }
+        }
+        picked.edit().putBoolean("selection_ready", false).apply()
+        status.text = "Point selected: X=${x.toInt()}, Y=${y.toInt()}. Review the coordinates before adding a step."
     }
 
     private fun addTap() {
