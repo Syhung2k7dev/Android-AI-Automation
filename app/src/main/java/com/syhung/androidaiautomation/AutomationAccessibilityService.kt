@@ -81,6 +81,7 @@ class AutomationAccessibilityService : AccessibilityService() {
                 scheduleNextStep(step.durationMs)
             }
             is WorkflowStep.WaitForText -> beginTextCondition(step)
+            is WorkflowStep.WaitForImage -> beginImageCondition(step)
             is WorkflowStep.Tap -> dispatchStroke(
                 step.x, step.y, step.x, step.y, step.durationMs
             )
@@ -181,6 +182,107 @@ class AutomationAccessibilityService : AccessibilityService() {
         conditionPollRunnable = Runnable {
             conditionPollRunnable = null
             captureForTextCondition(condition)
+        }
+        handler.postDelayed(conditionPollRunnable!!, condition.pollIntervalMs)
+    }
+
+    private fun beginImageCondition(condition: WorkflowStep.WaitForImage) {
+        conditionDeadline = SystemClock.elapsedRealtime() + condition.timeoutMs
+        conditionCaptureInFlight = false
+        captureForImageCondition(condition)
+    }
+
+    private fun captureForImageCondition(condition: WorkflowStep.WaitForImage) {
+        if (!running || conditionCaptureInFlight) return
+        if (SystemClock.elapsedRealtime() >= conditionDeadline) {
+            stopSequence()
+            Toast.makeText(this, "Image condition timed out. Workflow stopped.", Toast.LENGTH_LONG).show()
+            return
+        }
+        conditionCaptureInFlight = true
+        val captureGeneration = workflowGeneration
+        try {
+            takeScreenshot(Display.DEFAULT_DISPLAY, mainExecutor, object : TakeScreenshotCallback {
+                override fun onSuccess(screenshot: ScreenshotResult) {
+                    val buffer = screenshot.hardwareBuffer
+                    val screen = try {
+                        Bitmap.wrapHardwareBuffer(buffer, screenshot.colorSpace)
+                            ?.copy(Bitmap.Config.ARGB_8888, false)
+                    } catch (_: Exception) {
+                        null
+                    } finally {
+                        buffer.close()
+                    }
+                    if (screen == null) {
+                        if (captureGeneration == workflowGeneration) {
+                            conditionCaptureInFlight = false
+                            stopSequence()
+                            Toast.makeText(this@AutomationAccessibilityService, "Could not read screen for image condition.", Toast.LENGTH_LONG).show()
+                        }
+                        return
+                    }
+                    val template = TemplateStore.load(this@AutomationAccessibilityService, condition.template)
+                    if (template == null) {
+                        screen.recycle()
+                        if (captureGeneration == workflowGeneration) {
+                            conditionCaptureInFlight = false
+                            stopSequence()
+                            Toast.makeText(this@AutomationAccessibilityService, "Saved image template is missing or invalid.", Toast.LENGTH_LONG).show()
+                        }
+                        return
+                    }
+                    Thread {
+                        val result = try {
+                            LocalImageMatcher.match(screen, template, condition.threshold)
+                        } catch (_: Exception) {
+                            LocalImageMatcher.Result(false, 0f)
+                        } finally {
+                            screen.recycle()
+                            template.recycle()
+                        }
+                        handler.post {
+                            if (!running || captureGeneration != workflowGeneration) return@post
+                            conditionCaptureInFlight = false
+                            if (SystemClock.elapsedRealtime() >= conditionDeadline) {
+                                stopSequence()
+                                Toast.makeText(this@AutomationAccessibilityService, "Image condition timed out. Workflow stopped.", Toast.LENGTH_LONG).show()
+                            } else if (result.matched) {
+                                stepIndex++
+                                conditionPollRunnable?.let(handler::removeCallbacks)
+                                conditionPollRunnable = null
+                                scheduleNextStep(STEP_GAP_MS)
+                            } else {
+                                scheduleImagePoll(condition)
+                            }
+                        }
+                    }.start()
+                }
+
+                override fun onFailure(errorCode: Int) {
+                    if (!running || captureGeneration != workflowGeneration) return
+                    conditionCaptureInFlight = false
+                    stopSequence()
+                    Toast.makeText(this@AutomationAccessibilityService, "Screen capture unavailable for image condition ($errorCode).", Toast.LENGTH_LONG).show()
+                }
+            })
+        } catch (_: Exception) {
+            conditionCaptureInFlight = false
+            stopSequence()
+            Toast.makeText(this, "Unable to capture screen for image condition.", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun scheduleImagePoll(condition: WorkflowStep.WaitForImage) {
+        if (!running) return
+        if (SystemClock.elapsedRealtime() >= conditionDeadline) {
+            stopSequence()
+            Toast.makeText(this, "Image condition timed out. Workflow stopped.", Toast.LENGTH_LONG).show()
+            return
+        }
+        conditionPollRunnable?.let(handler::removeCallbacks)
+        conditionPollRunnable = Runnable {
+            conditionPollRunnable = null
+            captureForImageCondition(condition)
         }
         handler.postDelayed(conditionPollRunnable!!, condition.pollIntervalMs)
     }
