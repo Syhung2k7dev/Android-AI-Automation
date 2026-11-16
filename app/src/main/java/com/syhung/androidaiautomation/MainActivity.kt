@@ -106,6 +106,7 @@ class MainActivity : Activity() {
         root.addView(button("Save workflow on this device") { saveProfile() }, matchWidth())
         root.addView(button("Load workflow") { loadProfile() }, matchWidth())
         root.addView(button("Saved workflow library") { manageSavedWorkflows() }, matchWidth())
+        root.addView(button("Run saved profile queue") { confirmProfileQueue() }, matchWidth())
         root.addView(button("Export workflow file") { exportWorkflow() }, matchWidth())
         root.addView(button("Import workflow file") { importWorkflow() }, matchWidth())
         root.addView(button("Read screen text offline") { confirmOcrCapture() }, matchWidth())
@@ -443,6 +444,47 @@ class MainActivity : Activity() {
         status.text = "Workflow loaded: $name"
     }
 
+
+    private fun confirmProfileQueue() {
+        val names = preferences.all.keys
+            .filter { it.startsWith("workflow.") }
+            .map { it.removePrefix("workflow.") }
+            .filter { it.isNotBlank() }
+            .sorted()
+        if (names.isEmpty()) {
+            status.text = "Save at least one workflow profile before starting a queue."
+            return
+        }
+        if (names.size > 20) {
+            status.text = "Profile queue is limited to 20 workflows. Remove or export extra profiles first."
+            return
+        }
+        val queue = names.mapNotNull { name ->
+            preferences.getString("workflow.$name", null)?.let(::decodeWorkflow)
+        }
+        if (queue.size != names.size || queue.any { it.isEmpty() }) {
+            status.text = "One or more saved profiles are invalid. Review them before running the queue."
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Confirm profile queue")
+            .setMessage(
+                "Run all ${names.size} saved profiles in alphabetical order, one after another?\n\n" +
+                    names.joinToString("\n") { "• $it" } +
+                    "\n\nThe queue starts after a 5-second delay. You can stop it at any time."
+            )
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Start queue") { _, _ ->
+                val repeat = repeatInput.text.toString().toIntOrNull()
+                    ?.takeIf { it in 1..20 } ?: 1
+                if (AutomationAccessibilityService.startQueue(queue, repeat)) {
+                    status.text = "Profile queue armed: ${names.size} workflows. Switch to the intended app."
+                } else {
+                    status.text = "Accessibility service is not connected or the queue is invalid."
+                }
+            }
+            .show()
+    }
 
     private fun manageSavedWorkflows() {
         val names = preferences.all.keys
