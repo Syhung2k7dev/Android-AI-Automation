@@ -42,37 +42,36 @@ object BuildingPlanner {
         upgrades.forEach { require(it.durationSeconds >= 0 && it.prerequisites.all(byId::containsKey)) }
         val completed = mutableSetOf<String>()
         val active = mutableListOf<Pair<PlannedUpgrade, Long>>()
+        val started = mutableSetOf<String>()
         val result = mutableListOf<ScheduledUpgrade>()
         var now = 0L
         while (completed.size < upgrades.size) {
             val finished = active.filter { it.second <= now }
             finished.forEach { completed += it.first.id }
             active.removeAll(finished.toSet())
-            val ready = upgrades.filter { it.id !in completed && active.none { a -> a.first.id == it.id } && it.prerequisites.all(completed::contains) }
-                .sortedByDescending { it.priority }
-            while (active.size < availableBuilders && ready.isNotEmpty()) {
-                val next = ready.firstOrNull { candidate -> active.none { it.first.id == candidate.id } } ?: break
+
+            var launchedZeroDuration = true
+            while (active.size < availableBuilders && launchedZeroDuration) {
+                launchedZeroDuration = false
+                val next = upgrades
+                    .filter { it.id !in started && it.prerequisites.all(completed::contains) }
+                    .sortedWith(compareByDescending<PlannedUpgrade> { it.priority }.thenBy { it.id })
+                    .firstOrNull() ?: break
+                started += next.id
                 val end = now + next.durationSeconds
-                active += next to end
                 result += ScheduledUpgrade(next.id, now, end)
                 if (next.durationSeconds == 0L) {
                     completed += next.id
-                    active.removeAll { it.first.id == next.id }
+                    launchedZeroDuration = true
+                } else {
+                    active += next to end
                 }
-                // Remove the chosen item from this iteration's candidate list.
-                // The next loop recomputes ready after the active set changes.
-                if (active.size >= availableBuilders) break
-                if (ready.size == 1) break
-                // Mark selection locally by using the active set.
-                if (ready.all { rdy -> active.any { it.first.id == rdy.id } }) break
-                // Avoid repeatedly selecting the same candidate.
-                break
             }
-            if (active.isEmpty() && completed.size < upgrades.size) {
-                throw IllegalArgumentException("Dependency cycle or unresolved prerequisites")
-            }
-            if (active.isNotEmpty()) now = active.minOf { it.second }
+
+            if (completed.size == upgrades.size) break
+            if (active.isEmpty()) throw IllegalArgumentException("Dependency cycle or unresolved prerequisites")
+            now = active.minOf { it.second }
         }
-        return result.sortedBy { it.startAfterSeconds }
+        return result.sortedWith(compareBy<ScheduledUpgrade> { it.startAfterSeconds }.thenBy { it.id })
     }
 }
