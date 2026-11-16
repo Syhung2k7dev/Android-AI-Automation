@@ -120,6 +120,7 @@ class MainActivity : Activity() {
         root.addView(button("Check Gemini connection") { testGeminiConnection() }, matchWidth())
         root.addView(button("Gemini token / RPM monitor") { showGeminiUsage() }, matchWidth())
         root.addView(button("Analyze current screen with Gemini") { confirmGeminiVisualAnalysis() }, matchWidth())
+        root.addView(button("Generate workflow draft with Gemini") { requestGeminiWorkflowDraft() }, matchWidth())
         root.addView(button("Schedule cooldown reminder") { scheduleCooldownReminder() }, matchWidth())
         root.addView(button("Cancel cooldown reminder") { cancelCooldownReminder() }, matchWidth())
         root.addView(button("Clear OCR result") {
@@ -453,6 +454,54 @@ class MainActivity : Activity() {
                 } else {
                     status.text = "Accessibility service is not connected or the crop coordinates are invalid."
                 }
+            }
+            .show()
+    }
+
+    private fun requestGeminiWorkflowDraft() {
+        val key = try { CloudKeyStore.read(this) } catch (_: Exception) { null }
+        if (key.isNullOrBlank()) {
+            status.text = "Save a Gemini API key before generating a workflow draft."
+            return
+        }
+        val goalInput = EditText(this).apply {
+            hint = "Describe the workflow goal"
+            minLines = 2
+            setText("Open the target screen, wait until Ready appears, then continue.")
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Generate a workflow draft")
+            .setMessage("Gemini will generate a JSON draft from your text description. It will not run automatically. Review all coordinates and steps before saving or starting.")
+            .setView(goalInput)
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Generate") { _, _ ->
+                val goal = goalInput.text.toString().trim()
+                if (goal.isBlank() || goal.length > 1_000) {
+                    status.text = "Enter a goal between 1 and 1000 characters."
+                    return@setPositiveButton
+                }
+                status.text = "Generating and validating a workflow draft…"
+                Thread {
+                    try {
+                        val draft = GeminiCloudClient.generateWorkflowDraft(this, key, goal)
+                        runOnUiThread {
+                            val preview = draft.mapIndexed { index, step -> "${index + 1}. ${step.displayText()}" }.joinToString("\n")
+                            AlertDialog.Builder(this)
+                                .setTitle("Review generated workflow")
+                                .setMessage(preview)
+                                .setNegativeButton("Discard", null)
+                                .setPositiveButton("Load draft") { _, _ ->
+                                    replaceSteps(draft)
+                                    status.text = "Draft loaded. Review every coordinate and condition before saving or running."
+                                }
+                                .show()
+                        }
+                    } catch (error: Exception) {
+                        runOnUiThread {
+                            status.text = "Workflow draft rejected: ${error.localizedMessage ?: "Gemini or validation error"}"
+                        }
+                    }
+                }.start()
             }
             .show()
     }
