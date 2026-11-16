@@ -2,6 +2,7 @@ package com.syhung.androidaiautomation.agent.vision
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Rect
 import com.syhung.androidaiautomation.agent.data.CadssAsset
 import com.syhung.androidaiautomation.agent.data.CadssRecord
@@ -23,6 +24,23 @@ class VisionMemoryStore(context: Context, private val repository: CadssRepositor
         require(bounds.left >= 0 && bounds.top >= 0 && bounds.right <= parent.width && bounds.bottom <= parent.height)
         require(bounds.width() > 0 && bounds.height() > 0)
         return saveBitmap(bitmap, parent.id, label, "crop", bounds)
+    }
+
+
+    fun saveCropFromOriginal(imageId: String, bounds: Rect, label: String): CadssAsset {
+        val record = repository.get(imageId) ?: throw IllegalArgumentException("Original image record not found")
+        require(record.type == CadssRecordTypes.IMAGE) { "Crop parent must be an original image" }
+        val file = resolve(imageId) ?: throw IllegalArgumentException("Original image file is missing")
+        val bitmap = BitmapFactory.decodeFile(file.absolutePath) ?: throw IllegalArgumentException("Original image cannot be decoded")
+        try {
+            require(bounds.left >= 0 && bounds.top >= 0 && bounds.right <= bitmap.width && bounds.bottom <= bitmap.height)
+            require(bounds.width() > 0 && bounds.height() > 0)
+            val crop = Bitmap.createBitmap(bitmap, bounds.left, bounds.top, bounds.width(), bounds.height())
+            try { return saveBitmap(crop, imageId, label, "crop", bounds) }
+            finally { crop.recycle() }
+        } finally {
+            bitmap.recycle()
+        }
     }
 
     private fun saveBitmap(bitmap: Bitmap, parentId: String?, label: String, purpose: String, bounds: Rect? = null): CadssAsset {
