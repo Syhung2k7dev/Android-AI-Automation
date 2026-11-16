@@ -367,7 +367,7 @@ class MainActivity : Activity() {
     private fun readWorkflow(uri: Uri) {
         try {
             val content = contentResolver.openInputStream(uri)?.bufferedReader()?.use { reader ->
-                reader.readText().take(MAX_IMPORT_CHARS + 1)
+                readBounded(reader, MAX_IMPORT_CHARS)
             } ?: throw IllegalStateException("Unable to open selected file")
             if (content.length > MAX_IMPORT_CHARS) {
                 status.text = "Import rejected: file is too large."
@@ -383,6 +383,19 @@ class MainActivity : Activity() {
         } catch (error: Exception) {
             status.text = "Import failed: ${error.localizedMessage ?: "file error"}"
         }
+    }
+
+    private fun readBounded(reader: java.io.Reader, maxChars: Int): String {
+        val output = StringBuilder()
+        val buffer = CharArray(1024)
+        while (output.length <= maxChars) {
+            val remaining = maxChars + 1 - output.length
+            if (remaining <= 0) break
+            val count = reader.read(buffer, 0, minOf(buffer.size, remaining))
+            if (count < 0) break
+            output.append(buffer, 0, count)
+        }
+        return output.toString()
     }
 
     private fun decodeWorkflow(content: String): List<WorkflowStep>? {
