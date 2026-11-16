@@ -38,7 +38,8 @@ class CadssRepository(context: Context) {
                 put("payload", record.payload)
                 put("extensions", record.extensions)
             }
-            db.insertWithOnConflict("records", null, values, android.database.sqlite.SQLiteDatabase.CONFLICT_REPLACE)
+            val changed = db.update("records", values, "id = ?", arrayOf(record.id))
+            if (changed == 0) db.insertOrThrow("records", null, values)
             val audit = ContentValues().apply {
                 put("id", java.util.UUID.randomUUID().toString())
                 put("event_type", "record_upsert")
