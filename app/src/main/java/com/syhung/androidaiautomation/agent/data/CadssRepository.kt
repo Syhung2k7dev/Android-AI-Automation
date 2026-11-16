@@ -77,7 +77,7 @@ class CadssRepository(context: Context) {
         if (type != null) { where += "record_type = ?"; args += type }
         if (!includeArchived) where += "status != 'archived'"
         val sql = "SELECT id FROM records" + if (where.isEmpty()) "" else " WHERE " + where.joinToString(" AND ") +
-            " ORDER BY updated_at DESC LIMIT " + limit.coerceIn(1, 1000)
+            " ORDER BY updated_at DESC LIMIT " + limit.coerceIn(1, 100000)
         val c = helper.readableDatabase.rawQuery(sql, args.toTypedArray())
         val ids = mutableListOf<String>()
         c.use { while (it.moveToNext()) ids += it.getString(0) }
