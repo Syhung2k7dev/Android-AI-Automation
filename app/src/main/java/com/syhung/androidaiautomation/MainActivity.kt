@@ -127,7 +127,7 @@ class MainActivity : Activity() {
         }, matchWidth())
 
         root.addView(TextView(this).apply {
-            text = "Local workflow editor: create, reorder, save, import and export tap, swipe, wait, OCR text conditions, and local image conditions. Use visual point selection to capture coordinates from an authorized screen. The picker opens after a 10-second switch window and temporarily intercepts one tap to record its position. Workflows stay on this device unless you explicitly export a file. Each run requires confirmation and has a 5-second countdown. Limit: 50 steps and 20 repeats. Screen text recognition is available only after a separate confirmation; it captures one screenshot and processes it locally with a bundled model. No cloud AI service is used."
+            text = "Local workflow editor: create, reorder, save, import and export tap, swipe, wait, OCR text conditions, and local image conditions. Use visual point selection to capture coordinates from an authorized screen. The picker opens after a 10-second switch window and temporarily intercepts one tap to record its position. Workflows stay on this device unless you explicitly export a file. Each run requires confirmation and has a 5-second countdown. Limit: 50 steps and 20 repeats. Screen text recognition and image matching run locally. Optional Gemini text requests require a saved API key and a separate user action; this build does not automatically upload screenshots or execute AI-generated actions."
             textSize = 13f
             setPadding(0, 18, 0, 0)
         }, matchWidth())
