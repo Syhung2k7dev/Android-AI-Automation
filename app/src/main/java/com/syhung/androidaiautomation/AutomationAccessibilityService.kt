@@ -269,7 +269,12 @@ class AutomationAccessibilityService : AccessibilityService() {
                     }
                     Thread {
                         val result = try {
-                            LocalImageMatcher.match(screen, template, condition.threshold)
+                            val native = OpenCvImageMatcher.match(screen, template, condition.threshold)
+                            if (native != null) {
+                                LocalImageMatcher.Result(native.confidence >= condition.threshold, native.confidence)
+                            } else {
+                                LocalImageMatcher.match(screen, template, condition.threshold)
+                            }
                         } catch (_: Exception) {
                             LocalImageMatcher.Result(false, 0f)
                         } finally {
