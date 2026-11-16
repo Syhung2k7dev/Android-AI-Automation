@@ -19,7 +19,10 @@ class SchedulerReceiver : BroadcastReceiver() {
             )
         }
         val profileName = intent?.getStringExtra("profile_name").orEmpty()
-        context.getSharedPreferences("scheduler_state", Context.MODE_PRIVATE).edit().clear().apply()
+        val recurring = intent?.getBooleanExtra("recurring", false) == true
+        if (!recurring) {
+            context.getSharedPreferences("scheduler_state", Context.MODE_PRIVATE).edit().clear().apply()
+        }
         val openApp = PendingIntent.getActivity(
             context,
             7302,
@@ -32,8 +35,8 @@ class SchedulerReceiver : BroadcastReceiver() {
             @Suppress("DEPRECATION")
             Notification.Builder(context)
         }.setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
-            .setContentTitle("Automation cooldown finished")
-            .setContentText(if (profileName.isBlank()) "Review your workflow and choose whether to continue." else "Scheduled profile '$profileName' is ready for review.")
+            .setContentTitle(if (recurring) "Automation profile reminder" else "Automation cooldown finished")
+            .setContentText(if (profileName.isBlank()) "Review your workflow and choose whether to continue." else if (recurring) "Reminder for '$profileName'. Review it before choosing whether to run." else "Scheduled profile '$profileName' is ready for review.")
             .setContentIntent(openApp)
             .setAutoCancel(true)
             .build()

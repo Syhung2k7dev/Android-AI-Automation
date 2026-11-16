@@ -9,6 +9,7 @@ import android.provider.Settings
 import android.view.Gravity
 import android.view.ViewGroup
 import android.widget.Button
+import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -377,7 +378,7 @@ class MainActivity : Activity() {
             alarm.cancel(pending)
             pending.cancel()
             getSharedPreferences("scheduler_state", MODE_PRIVATE).edit().clear().apply()
-            status.text = "Scheduled cooldown reminder cancelled."
+            status.text = "Scheduled reminder cancelled."
         } else {
             status.text = "There is no pending cooldown reminder."
         }
@@ -533,17 +534,138 @@ class MainActivity : Activity() {
         val store = getSharedPreferences("gemini_visual_result", MODE_PRIVATE)
         if (!store.getBoolean("ready", false)) return
         val result = store.getString("result", "No analysis available").orEmpty()
+        val screenWidth = store.getInt("screen_width", 0)
+        val screenHeight = store.getInt("screen_height", 0)
         store.edit().clear().apply()
+        val candidates = try {
+            val root = org.json.JSONObject(result)
+            val array = root.optJSONArray("template_candidates") ?: org.json.JSONArray()
+            (0 until minOf(array.length(), 5)).mapNotNull { index ->
+                val item = array.optJSONObject(index) ?: return@mapNotNull null
+                val bounds = item.optJSONArray("bounds") ?: return@mapNotNull null
+                if (bounds.length() != 4) return@mapNotNull null
+                val values = (0..3).map { bounds.optInt(it, -1) }
+                if (values.any { it !in 0..1000 } ||
+                    values[2] - values[0] < 8 || values[3] - values[1] < 8
+                ) return@mapNotNull null
+                item
+            }
+        } catch (_: Exception) { emptyList() }
         val view = TextView(this).apply {
             text = result
             textSize = 15f
             setTextIsSelectable(true)
             setPadding(20, 16, 20, 16)
         }
-        AlertDialog.Builder(this)
+        val dialog = AlertDialog.Builder(this)
             .setTitle("Gemini visual analysis")
             .setView(ScrollView(this).apply { addView(view) })
             .setPositiveButton("Close", null)
+        if (candidates.isNotEmpty() && screenWidth > 0 && screenHeight > 0) {
+            dialog.setNeutralButton("Review template suggestions") { _, _ ->
+                reviewTemplateCandidates(candidates, screenWidth, screenHeight)
+            }
+            dialog.setNegativeButton("Create recovery draft") { _, _ ->
+                reviewRecoveryCandidates(candidates, screenWidth, screenHeight)
+            }
+        }
+        dialog.show()
+    }
+
+    private fun reviewRecoveryCandidates(
+        candidates: List<org.json.JSONObject>,
+        screenWidth: Int,
+        screenHeight: Int
+    ) {
+        val safeCandidates = candidates.filter { item ->
+            val label = item.optString("label", "").lowercase()
+            label.contains("close") || label.contains("dismiss") ||
+                label.contains("back button") || label == "back"
+        }
+        if (safeCandidates.isEmpty()) {
+            status.text = "No clearly identified close, dismiss, or back control was suggested. No recovery action was created."
+            return
+        }
+        val labels = safeCandidates.mapIndexed { index, item ->
+            "${index + 1}. ${item.optString("label", "Dismiss control").take(60)}"
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Review recovery action")
+            .setMessage("Only clearly labelled close/dismiss/back controls are eligible. The selected action becomes a draft only; it will not run until you inspect and explicitly confirm the workflow.")
+            .setItems(labels.toTypedArray()) { _, selected ->
+                val item = safeCandidates[selected]
+                val bounds = item.optJSONArray("bounds") ?: return@setItems
+                val x = (((bounds.optInt(0) + bounds.optInt(2)) / 2f) * screenWidth / 1000f).toInt()
+                val y = (((bounds.optInt(1) + bounds.optInt(3)) / 2f) * screenHeight / 1000f).toInt()
+                AlertDialog.Builder(this)
+                    .setTitle("Load recovery draft?")
+                    .setMessage(
+                        "Suggested target: ${item.optString("label")}\nTap point: ($x, $y). " +
+                            "Check that this is the intended harmless dismiss/back control before saving or running."
+                    )
+                    .setNegativeButton("Cancel", null)
+                    .setPositiveButton("Load draft") { _, _ ->
+                        replaceSteps(listOf(WorkflowStep.Tap(x.toFloat(), y.toFloat(), 300L)))
+                        status.text = "Recovery draft loaded. Verify the target and coordinates; it has not been run."
+                    }
+                    .show()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun reviewTemplateCandidates(
+        candidates: List<org.json.JSONObject>,
+        screenWidth: Int,
+        screenHeight: Int
+    ) {
+        val labels = candidates.mapIndexed { index, item ->
+            "${index + 1}. ${item.optString("label", "Visible UI element").take(60)}"
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Choose a template to learn")
+            .setMessage("Gemini only suggests approximate image regions. Select one to review its crop; nothing is saved until you confirm.")
+            .setItems(labels.toTypedArray()) { _, selected ->
+                val item = candidates[selected]
+                val bounds = item.optJSONArray("bounds") ?: return@setItems
+                val left = (bounds.optInt(0) * screenWidth / 1000f).toInt().coerceIn(0, screenWidth)
+                val top = (bounds.optInt(1) * screenHeight / 1000f).toInt().coerceIn(0, screenHeight)
+                val right = (bounds.optInt(2) * screenWidth / 1000f).toInt().coerceIn(0, screenWidth)
+                val bottom = (bounds.optInt(3) * screenHeight / 1000f).toInt().coerceIn(0, screenHeight)
+                if (right - left < 8 || bottom - top < 8) {
+                    status.text = "Suggested crop is too small. Select the region manually instead."
+                    return@setItems
+                }
+                val nameInput = EditText(this).apply {
+                    hint = "Local template name"
+                    setSingleLine(true)
+                    setText(item.optString("label", "learned_template")
+                        .replace(Regex("[^A-Za-z0-9_-]"), "_").take(40))
+                }
+                AlertDialog.Builder(this)
+                    .setTitle("Confirm local template")
+                    .setMessage(
+                        "Suggested region: left $left, top $top, right $right, bottom $bottom. " +
+                            "Return to the same screen before capture. The crop is stored only on this device and is not uploaded."
+                    )
+                    .setView(nameInput)
+                    .setNegativeButton("Cancel", null)
+                    .setPositiveButton("Capture and save") { _, _ ->
+                        val name = nameInput.text.toString().trim()
+                        if (!name.matches(Regex("[A-Za-z0-9_-]{1,40}"))) {
+                            status.text = "Use 1–40 letters, numbers, underscores or hyphens for the template name."
+                        } else if (AutomationAccessibilityService.armTemplateLearning(
+                                name, left, top, right, bottom
+                            )
+                        ) {
+                            status.text = "Template suggestion accepted. Return to the same screen; a local crop will be captured after 8 seconds."
+                        } else {
+                            status.text = "Accessibility service is not connected or the suggested crop is invalid."
+                        }
+                    }
+                    .show()
+            }
+            .setNegativeButton("Cancel", null)
             .show()
     }
 
@@ -556,43 +678,81 @@ class MainActivity : Activity() {
             return
         }
         val input = EditText(this).apply {
-            hint = "Minutes from now (1–1440)"
+            hint = "Minutes from now / repeat interval"
             setSingleLine(true)
             setText("30")
             inputType = InputType.TYPE_CLASS_NUMBER
         }
+        val recurring = CheckBox(this).apply {
+            text = "Repeat reminder (minimum 15 minutes, maximum 7 days)"
+            isChecked = false
+        }
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(24, 8, 24, 0)
+            addView(input, matchWidth())
+            addView(recurring, matchWidth())
+        }
         AlertDialog.Builder(this)
-            .setTitle("Schedule a cooldown reminder")
-            .setMessage("Schedule a reminder for a saved profile. The device may delay this inexact alarm to save power. When it arrives, the app asks you to review the workflow; it never starts automatically.")
-            .setView(input)
+            .setTitle("Schedule profile reminder")
+            .setMessage("A reminder never starts automation. When it arrives, review the saved profile and explicitly confirm any run. Repeating reminders are inexact and may be delayed by Android battery management.")
+            .setView(content)
             .setNegativeButton("Cancel", null)
             .setPositiveButton("Schedule") { _, _ ->
-                val minutes = input.text.toString().toLongOrNull()?.takeIf { it in 1L..1440L }
+                val minutes = input.text.toString().toLongOrNull()
+                val isRecurring = recurring.isChecked
+                val validMinutes = minutes != null && if (isRecurring) {
+                    minutes in 15L..10_080L
+                } else {
+                    minutes in 1L..1_440L
+                }
                 val profileName = profileInput.text.toString().trim()
-                if (minutes == null || profileName.isBlank() ||
+                if (!validMinutes || profileName.isBlank() ||
                     preferences.getString("workflow.$profileName", null) == null
                 ) {
-                    status.text = "Enter 1–1440 minutes and the exact name of an existing saved profile."
-                } else {
-                    val alarm = getSystemService(ALARM_SERVICE) as android.app.AlarmManager
-                    val intent = Intent(this, SchedulerReceiver::class.java)
-                        .putExtra("profile_name", profileName)
-                    val pending = android.app.PendingIntent.getBroadcast(
-                        this, SCHEDULER_REQUEST,
-                        intent,
-                        android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
+                    status.text = if (isRecurring) {
+                        "Enter a 15–10080 minute interval and an existing saved profile name."
+                    } else {
+                        "Enter 1–1440 minutes and the exact name of an existing saved profile."
+                    }
+                    return@setPositiveButton
+                }
+                val intervalMinutes = minutes ?: return@setPositiveButton
+                val alarm = getSystemService(ALARM_SERVICE) as android.app.AlarmManager
+                val intent = Intent(this, SchedulerReceiver::class.java)
+                    .putExtra("profile_name", profileName)
+                    .putExtra("recurring", isRecurring)
+                val pending = android.app.PendingIntent.getBroadcast(
+                    this, SCHEDULER_REQUEST, intent,
+                    android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
+                )
+                val triggerAt = System.currentTimeMillis() + intervalMinutes * 60_000L
+                val state = getSharedPreferences("scheduler_state", MODE_PRIVATE)
+                state.edit()
+                    .putBoolean("enabled", true)
+                    .putBoolean("recurring", isRecurring)
+                    .putLong("interval_minutes", if (isRecurring) intervalMinutes else 0L)
+                    .putString("profile_name", profileName)
+                    .putLong("trigger_at", triggerAt)
+                    .apply()
+                if (isRecurring) {
+                    alarm.setInexactRepeating(
+                        android.app.AlarmManager.RTC_WAKEUP,
+                        triggerAt,
+                        intervalMinutes * 60_000L,
+                        pending
                     )
-                    val triggerAt = System.currentTimeMillis() + minutes * 60_000L
-                    getSharedPreferences("scheduler_state", MODE_PRIVATE).edit()
-                        .putString("profile_name", profileName)
-                        .putLong("trigger_at", triggerAt)
-                        .apply()
+                } else {
                     alarm.setAndAllowWhileIdle(
                         android.app.AlarmManager.RTC_WAKEUP,
                         triggerAt,
                         pending
                     )
-                    status.text = "Reminder scheduled for profile '$profileName' in about $minutes minutes. Automation will require your confirmation."
+                }
+                status.text = if (isRecurring) {
+                    "Repeating reminder set every $intervalMinutes minutes for '$profileName'. It will be restored after reboot."
+                } else {
+                    "One-shot reminder scheduled for '$profileName' in about $intervalMinutes minutes."
                 }
             }
             .show()

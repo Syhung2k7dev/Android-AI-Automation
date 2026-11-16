@@ -22,18 +22,18 @@ An independent Android automation prototype built around explicit user control a
 - Sequential saved-profile queue: up to 20 profiles, explicit confirmation, 50 steps per profile.
 - Floating accessibility dashboard with Pause/Resume/Stop controls and a visible foreground notification during user-started execution.
 - Perceptual-hash screen inactivity watchdog; after repeated unchanged screen samples during a gesture step, it pauses for user review instead of taking recovery actions.
-- One-shot cooldown reminders scheduled with `AlarmManager.setAndAllowWhileIdle`; no periodic polling is performed while waiting, and reminders never auto-start workflows.
+- One-shot or recurring profile reminders scheduled with `AlarmManager`; recurring reminders are inexact, restored after device reboot, and never auto-start workflows. No periodic screen polling is performed while waiting.
 - Current workflow limits: 50 steps and 20 repeats.
 - OCR condition defaults: 30-second timeout, 2-second polling interval; both are bounded to avoid indefinite capture loops.
 
-This remains an early development build. The current visual recovery module analyzes a screenshot only after explicit user consent and displays a structured suggestion; it does not automatically execute AI output. Template learning requires the user to choose a crop region. Cooldown scheduling currently provides one-shot reminders, not unattended recurring workflow execution. Device-level performance and ColorOS compatibility still require testing.
+This remains an early development build. Visual recovery analyzes a screenshot only after explicit user consent. Gemini may suggest candidate UI regions; the user must review a candidate before saving a local template or loading a limited dismiss/back recovery draft. No AI-generated action is executed automatically. Recurring scheduler alarms provide reminders only, require user review before running a profile, and are restored after reboot. Device-level performance and ColorOS compatibility still require testing.
 
 ## Remaining work
 
 - Multi-scale matching, image-absence conditions, and robust visual-region tracking.
-- Recurring calendar-like schedules, reboot restoration, and profile-specific cooldown timers.
+- Calendar-style schedules with more advanced recurrence rules, per-profile multiple timers, and user-visible next-run management.
 - Full unattended recovery is intentionally not enabled: Gemini suggestions require review and are never blindly dispatched as gestures.
-- Automated template learning from reviewed and user-approved visual examples; current template capture is user-selected and local.
+- More robust template candidate validation, preview overlays, and multi-scale matching; current Gemini-assisted candidates require user review and confirmation before local storage.
 - Production release signing, security review, and Play Protect / distribution verification.
 
 ## Platform target
@@ -46,11 +46,11 @@ This remains an early development build. The current visual recovery module anal
 
 ## Optional Gemini API settings
 
-Users may enter or remove their own Gemini API key in the app. The key is stored locally with encrypted preferences backed by Android Keystore. A separate user action is required to test the connection. The current integration sends only a short text test prompt, tracks API-reported token usage, retries transient network/server failures with bounded exponential backoff, and opens a five-minute circuit breaker after repeated failures. Cloud use is optional; local workflows remain available without a key. No screenshot is uploaded by the current implementation. API keys and requests are sensitive: do not share them, and review Google's API terms, data handling, and billing before enabling cloud access.
+Users may enter or remove their own Gemini API key in the app. The key is stored locally with encrypted preferences backed by Android Keystore. A separate user action is required to test the connection. The integration supports explicit text requests, screenshot analysis after a separate consent prompt, and validated workflow drafts. It tracks API-reported token usage, retries transient network/server failures with bounded exponential backoff, and opens a five-minute circuit breaker after repeated failures. Cloud use is optional; local workflows remain available without a key. API keys and requests are sensitive: do not share them, and review Google's API terms, data handling, and billing before enabling cloud access.
 
 ## Runtime controls
 
-A user-started workflow runs with a visible foreground notification and an accessibility overlay dashboard. The pHash watchdog samples only while a gesture step is active; repeated near-identical screens pause the workflow for user review. Pause cancels scheduled polling, and Stop cancels the queue. The cooldown scheduler uses an inexact `AlarmManager` reminder; it does not launch or resume automation by itself. Android and ColorOS may delay alarms or terminate services under battery-management policies.
+A user-started workflow runs with a visible foreground notification and an accessibility overlay dashboard. The pHash watchdog samples only while a gesture step is active; repeated near-identical screens pause the workflow for user review. Pause cancels scheduled polling, and Stop cancels the queue. The cooldown scheduler supports one-shot and recurring inexact `AlarmManager` reminders. Recurring reminder configuration is persisted and restored after `BOOT_COMPLETED`; a reminder never launches or resumes automation by itself. Android and ColorOS may delay alarms or terminate services under battery-management policies.
 
 ## Security and permissions
 
@@ -78,6 +78,6 @@ The implementation is original and does not copy Smart AutoClicker's source. Any
 
 1. Device compatibility and execution reliability checks on Oppo Reno6 Z / ColorOS.
 2. Multi-scale visual matching and image-absence conditions.
-3. Recurring timers and reboot restoration.
-4. User-reviewed template suggestions and improved recovery diagnostics.
+3. Calendar-style schedule management and per-profile timer controls.
+4. Template candidate previews and stronger recovery diagnostics.
 5. Release signing, distribution review, and security verification.

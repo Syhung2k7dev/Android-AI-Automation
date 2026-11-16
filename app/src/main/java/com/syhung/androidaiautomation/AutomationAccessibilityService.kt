@@ -807,12 +807,14 @@ class AutomationAccessibilityService : AccessibilityService() {
                         saveGeminiAnalysis("Could not prepare the screenshot. It was not uploaded.")
                         return
                     }
+                    val capturedWidth = bitmap.width
+                    val capturedHeight = bitmap.height
                     Thread {
                         val result = try {
                             GeminiCloudClient.analyzeImage(
                                 this@AutomationAccessibilityService,
                                 key,
-                                "Analyze this user-authorized Android screenshot. Return concise JSON with keys summary, visible_controls, possible_blocker, suggested_next_step. Describe only visible UI. Do not invent details, do not provide coordinates or gesture commands, and do not claim to have changed the device.",
+                                "Analyze this user-authorized Android screenshot. Return JSON with keys summary, visible_controls, possible_blocker, suggested_next_step, template_candidates. template_candidates must be an array of zero to five objects with label and bounds [left,top,right,bottom] normalized to 0..1000. Suggest only clearly visible, non-sensitive UI controls suitable for local visual matching. Describe only visible UI. Never include personal data, passwords, private messages, or gesture/action instructions. Do not claim to have changed the device.",
                                 bitmap
                             ).text
                         } catch (error: Exception) {
@@ -820,7 +822,7 @@ class AutomationAccessibilityService : AccessibilityService() {
                         } finally {
                             bitmap.recycle()
                         }
-                        saveGeminiAnalysis(result)
+                        saveGeminiAnalysis(result, capturedWidth, capturedHeight)
                     }.start()
                 }
 
@@ -833,9 +835,11 @@ class AutomationAccessibilityService : AccessibilityService() {
         }
     }
 
-    private fun saveGeminiAnalysis(text: String) {
+    private fun saveGeminiAnalysis(text: String, screenWidth: Int = 0, screenHeight: Int = 0) {
         getSharedPreferences(GEMINI_RESULT_PREFS, MODE_PRIVATE).edit()
             .putString("result", text.take(12_000))
+            .putInt("screen_width", screenWidth)
+            .putInt("screen_height", screenHeight)
             .putBoolean("ready", true)
             .apply()
         handler.post {
