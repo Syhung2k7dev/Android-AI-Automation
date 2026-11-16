@@ -62,7 +62,7 @@ class CadssBackupManager(context: Context, private val repository: CadssReposito
                 while (true) {
                     val entry = zip.nextEntry ?: break
                     val name = entry.name
-                    require(!entry.isAbsolute && !name.contains("..") && !name.startsWith("/") && !name.contains("\\"))
+                    require(!File(name).isAbsolute && !name.contains("..") && !name.startsWith("/") && !name.contains("\\"))
                     if (!entry.isDirectory) {
                         val target = File(staging, name)
                         require(target.canonicalPath.startsWith(staging.canonicalPath + File.separator))
