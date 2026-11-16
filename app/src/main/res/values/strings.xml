@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Android AI Automation</string>
+    <string name="accessibility_service_name">Android AI Automation</string>
+    <string name="accessibility_service_description">Performs user-configured taps after the service is explicitly enabled and started.</string>
+</resources>
