@@ -98,8 +98,8 @@ class MainActivity : Activity() {
         AlertDialog.Builder(this)
             .setTitle("Confirm tap sequence")
             .setMessage(
-                "The app will send \${values.count} taps at X=\${values.x}, Y=\${values.y}, " +
-                    "with \${values.interval} ms between taps. The first tap starts after 5 seconds, " +
+                "The app will send ${values.count} taps at X=${values.x}, Y=${values.y}, " +
+                    "with ${values.interval} ms between taps. The first tap starts after 5 seconds, " +
                     "so you can switch to the intended screen. This action does not inspect screen content. " +
                     "Return to Android AI Automation and press Stop to cancel."
             )
@@ -135,10 +135,10 @@ class MainActivity : Activity() {
         }
 
         preferences.edit()
-            .putFloat("\${name}.x", values.x)
-            .putFloat("\${name}.y", values.y)
-            .putLong("\${name}.interval", values.interval)
-            .putInt("\${name}.count", values.count)
+            .putFloat("${name}.x", values.x)
+            .putFloat("${name}.y", values.y)
+            .putLong("${name}.interval", values.interval)
+            .putInt("${name}.count", values.count)
             .putString("last_profile", name)
             .apply()
 
@@ -147,15 +147,15 @@ class MainActivity : Activity() {
 
     private fun loadProfile() {
         val name = profileInput.text.toString().trim()
-        if (name.isEmpty() || !preferences.contains("\${name}.x")) {
+        if (name.isEmpty() || !preferences.contains("${name}.x")) {
             status.text = "Profile not found. Enter the exact name of a saved profile."
             return
         }
 
-        xInput.setText(preferences.getFloat("\${name}.x", 540f).toString())
-        yInput.setText(preferences.getFloat("\${name}.y", 900f).toString())
-        intervalInput.setText(preferences.getLong("\${name}.interval", 1500L).toString())
-        countInput.setText(preferences.getInt("\${name}.count", 20).toString())
+        xInput.setText(preferences.getFloat("${name}.x", 540f).toString())
+        yInput.setText(preferences.getFloat("${name}.y", 900f).toString())
+        intervalInput.setText(preferences.getLong("${name}.interval", 1500L).toString())
+        countInput.setText(preferences.getInt("${name}.count", 20).toString())
         status.text = "Profile loaded: $name"
     }
 
