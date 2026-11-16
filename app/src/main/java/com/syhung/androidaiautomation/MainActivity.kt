@@ -118,6 +118,7 @@ class MainActivity : Activity() {
         root.addView(button("Read screen text offline") { confirmOcrCapture() }, matchWidth())
         root.addView(button("Gemini cloud settings") { configureGemini() }, matchWidth())
         root.addView(button("Check Gemini connection") { testGeminiConnection() }, matchWidth())
+        root.addView(button("Gemini token / RPM monitor") { showGeminiUsage() }, matchWidth())
         root.addView(button("Analyze current screen with Gemini") { confirmGeminiVisualAnalysis() }, matchWidth())
         root.addView(button("Schedule cooldown reminder") { scheduleCooldownReminder() }, matchWidth())
         root.addView(button("Cancel cooldown reminder") { cancelCooldownReminder() }, matchWidth())
@@ -219,6 +220,22 @@ class MainActivity : Activity() {
                 }
             }
         }.start()
+    }
+
+    private fun showGeminiUsage() {
+        val usage = GeminiCloudClient.usage(this)
+        val circuit = getSharedPreferences("gemini_resilience", MODE_PRIVATE)
+        val openUntil = circuit.getLong("open_until", 0L)
+        val remaining = ((openUntil - System.currentTimeMillis()).coerceAtLeast(0L) / 1000L)
+        AlertDialog.Builder(this)
+            .setTitle("Gemini usage and quota")
+            .setMessage(
+                "$usage\n\nCircuit breaker: " +
+                    if (remaining > 0L) "OPEN — local-only mode for about $remaining seconds."
+                    else "CLOSED — cloud requests available when explicitly requested."
+            )
+            .setPositiveButton("Close", null)
+            .show()
     }
 
     private fun confirmOcrCapture() {
