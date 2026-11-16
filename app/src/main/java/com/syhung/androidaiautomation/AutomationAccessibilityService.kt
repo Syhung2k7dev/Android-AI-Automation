@@ -18,6 +18,7 @@ import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.widget.Button
 import android.widget.FrameLayout
+import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import com.google.mlkit.vision.common.InputImage
@@ -53,7 +54,6 @@ class AutomationAccessibilityService : AccessibilityService() {
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
-        showDashboard()
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) = Unit
@@ -74,7 +74,7 @@ class AutomationAccessibilityService : AccessibilityService() {
     }
 
     private fun executeNextStep() {
-        if (!running) return
+        if (!running || paused) return
         if (stepIndex >= steps.size) {
             repeatIndex++
             if (repeatIndex >= repeatLimit) {
@@ -204,7 +204,7 @@ class AutomationAccessibilityService : AccessibilityService() {
     }
 
     private fun scheduleConditionPoll(condition: WorkflowStep.WaitForText) {
-        if (!running) return
+        if (!running || paused) return
         if (SystemClock.elapsedRealtime() >= conditionDeadline) {
             stopSequence()
             Toast.makeText(this, "Text condition timed out. Workflow stopped.", Toast.LENGTH_LONG).show()
@@ -428,6 +428,7 @@ class AutomationAccessibilityService : AccessibilityService() {
     }
 
     private fun applyBranchResult(matched: Boolean) {
+        if (paused) return
         val current = stepIndex
         stepIndex = if (matched) current + 1 else findFalseBranchTarget(current)
         scheduleNextStep(STEP_GAP_MS)
@@ -482,7 +483,7 @@ class AutomationAccessibilityService : AccessibilityService() {
                 if (!running) return
                 stepIndex++
                 updateDashboard()
-                scheduleNextStep(STEP_GAP_MS)
+                if (!paused) scheduleNextStep(STEP_GAP_MS)
                 scheduleWatchdog()
             }
 
@@ -527,6 +528,147 @@ class AutomationAccessibilityService : AccessibilityService() {
         repeatIndex = 0
     }
 
+
+    private fun showDashboard() {
+        if (dashboardView != null) return
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(14, 10, 14, 10)
+            setBackgroundColor(0xEE202938.toInt())
+        }
+        dashboardStatus = TextView(this).apply {
+            text = "Automation ready"
+            textSize = 13f
+            setTextColor(Color.WHITE)
+        }
+        panel.addView(dashboardStatus)
+        panel.addView(Button(this).apply {
+            text = "Pause / Resume"
+            setOnClickListener {
+                if (paused) resumeSequence() else pauseSequence()
+            }
+        })
+        panel.addView(Button(this).apply {
+            text = "Stop"
+            setOnClickListener {
+                stopSequence()
+                Toast.makeText(this@AutomationAccessibilityService, "Workflow stopped.", Toast.LENGTH_SHORT).show()
+            }
+        })
+        panel.addView(Button(this).apply {
+            text = "Hide dashboard"
+            setOnClickListener { removeDashboard() }
+        })
+        val params = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+            PixelFormat.TRANSLUCENT
+        ).apply { gravity = Gravity.TOP or Gravity.END }
+        try {
+            (getSystemService(WINDOW_SERVICE) as WindowManager).addView(panel, params)
+            dashboardView = panel
+            updateDashboard()
+        } catch (_: Exception) {
+            dashboardView = null
+            dashboardStatus = null
+            Toast.makeText(this, "Floating dashboard could not be shown on this device.", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun updateDashboard() {
+        dashboardStatus?.text = when {
+            !running -> "Automation stopped"
+            paused -> "Automation paused"
+            else -> "Running profile ${queueIndex + 1}/${workflowQueue.size.coerceAtLeast(1)} • step ${stepIndex + 1}/${steps.size}"
+        }
+    }
+
+    private fun removeDashboard() {
+        val view = dashboardView ?: return
+        dashboardView = null
+        dashboardStatus = null
+        try {
+            (getSystemService(WINDOW_SERVICE) as WindowManager).removeView(view)
+        } catch (_: Exception) { }
+    }
+
+    private fun pauseSequence() {
+        if (!running || paused) return
+        paused = true
+        sequenceRunnable?.let(handler::removeCallbacks)
+        sequenceRunnable = null
+        conditionPollRunnable?.let(handler::removeCallbacks)
+        conditionPollRunnable = null
+        watchdogRunnable?.let(handler::removeCallbacks)
+        watchdogRunnable = null
+        updateDashboard()
+        Toast.makeText(this, "Workflow paused. Use the dashboard to resume.", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun resumeSequence() {
+        if (!running || !paused) return
+        paused = false
+        updateDashboard()
+        scheduleNextStep(0L)
+        scheduleWatchdog()
+    }
+
+    private fun scheduleWatchdog() {
+        watchdogRunnable?.let(handler::removeCallbacks)
+        if (!running || paused) return
+        watchdogRunnable = Runnable {
+            watchdogRunnable = null
+            if (!running || paused) return@Runnable
+            captureWatchdogFrame()
+        }
+        handler.postDelayed(watchdogRunnable!!, WATCHDOG_INTERVAL_MS)
+    }
+
+    private fun captureWatchdogFrame() {
+        if (!running || paused) return
+        try {
+            takeScreenshot(Display.DEFAULT_DISPLAY, mainExecutor, object : TakeScreenshotCallback {
+                override fun onSuccess(screenshot: ScreenshotResult) {
+                    val buffer = screenshot.hardwareBuffer
+                    val bitmap = try {
+                        Bitmap.wrapHardwareBuffer(buffer, screenshot.colorSpace)?.copy(Bitmap.Config.ARGB_8888, false)
+                    } catch (_: Exception) { null } finally { buffer.close() }
+                    if (bitmap == null) {
+                        scheduleWatchdog()
+                        return
+                    }
+                    Thread {
+                        val hash = try { PerceptualHash.compute(bitmap) } catch (_: Exception) { null }
+                        bitmap.recycle()
+                        handler.post {
+                            if (!running || paused || hash == null) return@post
+                            val previous = lastScreenHash
+                            if (previous != null && PerceptualHash.distance(previous, hash) <= WATCHDOG_HASH_DISTANCE) {
+                                stagnantSamples++
+                            } else {
+                                stagnantSamples = 0
+                            }
+                            lastScreenHash = hash
+                            if (stagnantSamples >= WATCHDOG_STAGNANT_LIMIT) {
+                                pauseSequence()
+                                Toast.makeText(this@AutomationAccessibilityService, "Screen appears unchanged. Workflow paused for review.", Toast.LENGTH_LONG).show()
+                            } else {
+                                scheduleWatchdog()
+                            }
+                        }
+                    }.start()
+                }
+
+                override fun onFailure(errorCode: Int) {
+                    scheduleWatchdog()
+                }
+            })
+        } catch (_: Exception) {
+            scheduleWatchdog()
+        }
+    }
 
     private fun captureScreenForOcr() {
         ocrCaptureRunnable = null
@@ -699,6 +841,9 @@ class AutomationAccessibilityService : AccessibilityService() {
         private const val OCR_PREFS = "ocr_results"
         private const val OCR_CAPTURE_DELAY_MS = 8_000L
         private const val MAX_OCR_RESULT_CHARS = 30_000
+        private const val WATCHDOG_INTERVAL_MS = 12_000L
+        private const val WATCHDOG_STAGNANT_LIMIT = 3
+        private const val WATCHDOG_HASH_DISTANCE = 2
 
         @Volatile private var instance: AutomationAccessibilityService? = null
 
@@ -724,7 +869,9 @@ class AutomationAccessibilityService : AccessibilityService() {
             service.repeatIndex = 0
             service.running = true
             service.paused = false
+            service.showDashboard()
             service.updateDashboard()
+            service.scheduleWatchdog()
             service.startRunnable = Runnable {
                 service.startRunnable = null
                 if (service.running) service.executeNextStep()
