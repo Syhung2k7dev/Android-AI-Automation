@@ -50,9 +50,7 @@ object BuildingPlanner {
             finished.forEach { completed += it.first.id }
             active.removeAll(finished.toSet())
 
-            var launchedZeroDuration = true
-            while (active.size < availableBuilders && launchedZeroDuration) {
-                launchedZeroDuration = false
+            while (active.size < availableBuilders) {
                 val next = upgrades
                     .filter { it.id !in started && it.prerequisites.all(completed::contains) }
                     .sortedWith(compareByDescending<PlannedUpgrade> { it.priority }.thenBy { it.id })
@@ -60,12 +58,8 @@ object BuildingPlanner {
                 started += next.id
                 val end = now + next.durationSeconds
                 result += ScheduledUpgrade(next.id, now, end)
-                if (next.durationSeconds == 0L) {
-                    completed += next.id
-                    launchedZeroDuration = true
-                } else {
-                    active += next to end
-                }
+                if (next.durationSeconds == 0L) completed += next.id
+                else active += next to end
             }
 
             if (completed.size == upgrades.size) break
