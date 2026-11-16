@@ -565,8 +565,53 @@ class MainActivity : Activity() {
             dialog.setNeutralButton("Review template suggestions") { _, _ ->
                 reviewTemplateCandidates(candidates, screenWidth, screenHeight)
             }
+            dialog.setNegativeButton("Create recovery draft") { _, _ ->
+                reviewRecoveryCandidates(candidates, screenWidth, screenHeight)
+            }
         }
         dialog.show()
+    }
+
+    private fun reviewRecoveryCandidates(
+        candidates: List<org.json.JSONObject>,
+        screenWidth: Int,
+        screenHeight: Int
+    ) {
+        val safeCandidates = candidates.filter { item ->
+            val label = item.optString("label", "").lowercase()
+            label.contains("close") || label.contains("dismiss") ||
+                label.contains("back button") || label == "back"
+        }
+        if (safeCandidates.isEmpty()) {
+            status.text = "No clearly identified close, dismiss, or back control was suggested. No recovery action was created."
+            return
+        }
+        val labels = safeCandidates.mapIndexed { index, item ->
+            "${index + 1}. ${item.optString("label", "Dismiss control").take(60)}"
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Review recovery action")
+            .setMessage("Only clearly labelled close/dismiss/back controls are eligible. The selected action becomes a draft only; it will not run until you inspect and explicitly confirm the workflow.")
+            .setItems(labels.toTypedArray()) { _, selected ->
+                val item = safeCandidates[selected]
+                val bounds = item.optJSONArray("bounds") ?: return@setItems
+                val x = (((bounds.optInt(0) + bounds.optInt(2)) / 2f) * screenWidth / 1000f).toInt()
+                val y = (((bounds.optInt(1) + bounds.optInt(3)) / 2f) * screenHeight / 1000f).toInt()
+                AlertDialog.Builder(this)
+                    .setTitle("Load recovery draft?")
+                    .setMessage(
+                        "Suggested target: ${item.optString("label")}\nTap point: ($x, $y). " +
+                            "Check that this is the intended harmless dismiss/back control before saving or running."
+                    )
+                    .setNegativeButton("Cancel", null)
+                    .setPositiveButton("Load draft") { _, _ ->
+                        replaceSteps(listOf(WorkflowStep.Tap(x.toFloat(), y.toFloat(), 300L)))
+                        status.text = "Recovery draft loaded. Verify the target and coordinates; it has not been run."
+                    }
+                    .show()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     private fun reviewTemplateCandidates(
