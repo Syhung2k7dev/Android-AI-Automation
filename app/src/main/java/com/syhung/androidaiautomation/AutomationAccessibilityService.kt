@@ -131,7 +131,7 @@ class AutomationAccessibilityService : AccessibilityService() {
     private fun captureScreenForOcr() {
         ocrCaptureRunnable = null
         try {
-            takeScreenshot(Display.DEFAULT_DISPLAY, mainExecutor, object : TakeScreenshotCallback() {
+            takeScreenshot(Display.DEFAULT_DISPLAY, mainExecutor, object : TakeScreenshotCallback {
                 override fun onSuccess(screenshot: ScreenshotResult) {
                     val hardwareBuffer = screenshot.hardwareBuffer
                     val bitmap = try {
