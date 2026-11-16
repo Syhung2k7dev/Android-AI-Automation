@@ -14,6 +14,7 @@ class AutomationAccessibilityService : AccessibilityService() {
     private var tapX = 0f
     private var tapY = 0f
     private var intervalMs = 1500L
+    private var startRunnable: Runnable? = null
 
     override fun onServiceConnected() {
         super.onServiceConnected()
@@ -64,11 +65,15 @@ class AutomationAccessibilityService : AccessibilityService() {
 
     private fun stopSequence() {
         running = false
+        startRunnable?.let(handler::removeCallbacks)
+        startRunnable = null
         handler.removeCallbacksAndMessages(null)
         tapsRemaining = 0
     }
 
     companion object {
+        private const val START_DELAY_MS = 5_000L
+
         @Volatile private var instance: AutomationAccessibilityService? = null
 
         fun isConnected(): Boolean = instance != null
@@ -81,7 +86,11 @@ class AutomationAccessibilityService : AccessibilityService() {
             service.intervalMs = interval.coerceAtLeast(500L)
             service.tapsRemaining = count.coerceIn(1, 1000)
             service.running = true
-            service.scheduleTap()
+            service.startRunnable = Runnable {
+                service.startRunnable = null
+                if (service.running) service.scheduleTap()
+            }
+            service.handler.postDelayed(service.startRunnable!!, START_DELAY_MS)
             return true
         }
 
