@@ -86,6 +86,7 @@ class MainActivity : Activity() {
         root.addView(button("Import image template") { importImageTemplate() }, matchWidth())
         root.addView(button("Add wait-for-image condition") { addWaitForImage() }, matchWidth())
         root.addView(button("Manage image templates") { manageImageTemplates() }, matchWidth())
+        root.addView(button("Learn template from screen region") { confirmTemplateLearning() }, matchWidth())
         root.addView(button("Manage / reorder steps") { manageStep() }, matchWidth())
         root.addView(button("Clear workflow") {
             if (steps.isNotEmpty()) {
@@ -375,6 +376,34 @@ class MainActivity : Activity() {
             return
         }
         addStep(WorkflowStep.EndIf)
+    }
+
+    private fun confirmTemplateLearning() {
+        val name = templateInput.text.toString().trim()
+        val x1 = xInput.text.toString().toIntOrNull()
+        val y1 = yInput.text.toString().toIntOrNull()
+        val x2 = endXInput.text.toString().toIntOrNull()
+        val y2 = endYInput.text.toString().toIntOrNull()
+        if (!name.matches(Regex("[A-Za-z0-9_-]{1,40}")) ||
+            x1 == null || y1 == null || x2 == null || y2 == null ||
+            x1 < 0 || y1 < 0 || x2 < 0 || y2 < 0 ||
+            kotlin.math.abs(x2 - x1) < 8 || kotlin.math.abs(y2 - y1) < 8
+        ) {
+            status.text = "Enter a valid template name and two screen coordinates defining a region at least 8×8 pixels."
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Save a local image template?")
+            .setMessage("The app will capture one screen after 8 seconds and save only the rectangle between the two coordinate points in private app storage. The image will not be uploaded.")
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Save template") { _, _ ->
+                if (AutomationAccessibilityService.armTemplateLearning(name, x1, y1, x2, y2)) {
+                    status.text = "Template capture armed. Switch to the intended screen."
+                } else {
+                    status.text = "Accessibility service is not connected or the crop coordinates are invalid."
+                }
+            }
+            .show()
     }
 
     private fun confirmGeminiVisualAnalysis() {
