@@ -48,8 +48,17 @@ class SkillRegistry(context: Context) {
         val pair = c.use { if (it.moveToFirst()) it.getString(0) to it.getString(1) else null } ?: return false
         val validation = CaslValidator.validate(pair.first, pair.second)
         if (!validation.valid) return false
-        val values = ContentValues().apply { put("status", "active") }
-        return db.update("skill_revisions", values, "skill_id = ? AND revision = ?", arrayOf(skillId, revision.toString())) > 0
+        db.beginTransaction()
+        try {
+            val superseded = ContentValues().apply { put("status", "superseded") }
+            db.update("skill_revisions", superseded, "skill_id = ? AND status = 'active'", arrayOf(skillId))
+            val active = ContentValues().apply { put("status", "active") }
+            val changed = db.update("skill_revisions", active, "skill_id = ? AND revision = ?", arrayOf(skillId, revision.toString()))
+            if (changed > 0) db.setTransactionSuccessful()
+            return changed > 0
+        } finally {
+            db.endTransaction()
+        }
     }
 
     fun get(skillId: String, revision: Long? = null): RegisteredSkill? {
