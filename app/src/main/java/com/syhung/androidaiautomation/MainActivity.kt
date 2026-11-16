@@ -3,6 +3,7 @@ package com.syhung.androidaiautomation
 import android.app.Activity
 import android.app.AlertDialog
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
 import android.view.Gravity
@@ -25,6 +26,7 @@ class MainActivity : Activity() {
     private lateinit var repeatInput: EditText
     private lateinit var stepsView: TextView
     private val steps = mutableListOf<WorkflowStep>()
+    private var pendingExport: String? = null
 
     private val preferences by lazy {
         getSharedPreferences("automation_profiles", MODE_PRIVATE)
@@ -67,13 +69,19 @@ class MainActivity : Activity() {
         root.addView(button("Add tap step") { addTap() }, matchWidth())
         root.addView(button("Add swipe step") { addSwipe() }, matchWidth())
         root.addView(button("Add wait step") { addWait() }, matchWidth())
-        root.addView(button("Remove last step") {
-            if (steps.isNotEmpty()) steps.removeAt(steps.lastIndex)
-            renderSteps()
-        }, matchWidth())
+        root.addView(button("Manage / reorder steps") { manageStep() }, matchWidth())
         root.addView(button("Clear workflow") {
-            steps.clear()
-            renderSteps()
+            if (steps.isNotEmpty()) {
+                AlertDialog.Builder(this)
+                    .setMessage("Remove all ${steps.size} steps from the current workflow?")
+                    .setNegativeButton("Cancel", null)
+                    .setPositiveButton("Clear") { _, _ ->
+                        steps.clear()
+                        renderSteps()
+                        status.text = "Current workflow cleared."
+                    }
+                    .show()
+            }
         }, matchWidth())
 
         stepsView = TextView(this).apply {
@@ -85,6 +93,8 @@ class MainActivity : Activity() {
 
         root.addView(button("Save workflow on this device") { saveProfile() }, matchWidth())
         root.addView(button("Load workflow") { loadProfile() }, matchWidth())
+        root.addView(button("Export workflow file") { exportWorkflow() }, matchWidth())
+        root.addView(button("Import workflow file") { importWorkflow() }, matchWidth())
         root.addView(button("Open Accessibility settings") {
             startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
         }, matchWidth())
@@ -95,13 +105,12 @@ class MainActivity : Activity() {
         }, matchWidth())
 
         root.addView(TextView(this).apply {
-            text = "Local workflow editor: build a sequence of taps, swipes and waits. Workflows are stored only on this device. Each run requires confirmation and has a 5-second countdown. Limit: 50 steps and 20 repeats. Stop cancels the sequence. This build does not read screen contents, use OCR, capture the screen or connect to a cloud AI service. Use only with apps and screens you are authorized to control."
+            text = "Local workflow editor: create, reorder, save, import and export tap, swipe and wait steps. Workflows stay on this device unless you explicitly export a file. Each run requires confirmation and has a 5-second countdown. Limit: 50 steps and 20 repeats. This build does not read screen contents, use OCR, capture the screen or connect to a cloud AI service. Use only with apps and screens you are authorized to control."
             textSize = 13f
             setPadding(0, 18, 0, 0)
         }, matchWidth())
 
-        val scroll = ScrollView(this).apply { addView(root) }
-        setContentView(scroll)
+        setContentView(ScrollView(this).apply { addView(root) })
         refreshStatus()
     }
 
@@ -120,9 +129,9 @@ class MainActivity : Activity() {
     private fun addSwipe() {
         val start = readPoint() ?: return invalidInput()
         val endX = endXInput.text.toString().toFloatOrNull()
-            ?.takeIf { it >= 0f } ?: return invalidInput()
+            ?.takeIf { it.isFinite() && it in 0f..20_000f } ?: return invalidInput()
         val endY = endYInput.text.toString().toFloatOrNull()
-            ?.takeIf { it >= 0f } ?: return invalidInput()
+            ?.takeIf { it.isFinite() && it in 0f..20_000f } ?: return invalidInput()
         val duration = durationInput.text.toString().toLongOrNull()
             ?.takeIf { it in 50L..10_000L } ?: return invalidInput()
         addStep(WorkflowStep.Swipe(start.first, start.second, endX, endY, duration))
@@ -147,8 +156,60 @@ class MainActivity : Activity() {
     private fun readPoint(): Pair<Float, Float>? {
         val x = xInput.text.toString().toFloatOrNull() ?: return null
         val y = yInput.text.toString().toFloatOrNull() ?: return null
-        if (x < 0f || y < 0f) return null
+        if (!x.isFinite() || !y.isFinite() || x !in 0f..20_000f || y !in 0f..20_000f) return null
         return x to y
+    }
+
+    private fun manageStep() {
+        if (steps.isEmpty()) {
+            status.text = "There are no steps to manage."
+            return
+        }
+        val labels = steps.mapIndexed { index, step -> "${index + 1}. ${step.displayText()}" }
+        AlertDialog.Builder(this)
+            .setTitle("Select a step")
+            .setItems(labels.toTypedArray()) { _, index -> showStepActions(index) }
+            .setNegativeButton("Close", null)
+            .show()
+    }
+
+    private fun showStepActions(index: Int) {
+        val actions = mutableListOf<String>()
+        val actionIds = mutableListOf<Int>()
+        if (index > 0) {
+            actions.add("Move up")
+            actionIds.add(0)
+        }
+        if (index < steps.lastIndex) {
+            actions.add("Move down")
+            actionIds.add(1)
+        }
+        actions.add("Delete step")
+        actionIds.add(2)
+
+        AlertDialog.Builder(this)
+            .setTitle(steps[index].displayText())
+            .setItems(actions.toTypedArray()) { _, selected ->
+                when (actionIds[selected]) {
+                    0 -> {
+                        val item = steps.removeAt(index)
+                        steps.add(index - 1, item)
+                        status.text = "Step moved up."
+                    }
+                    1 -> {
+                        val item = steps.removeAt(index)
+                        steps.add(index + 1, item)
+                        status.text = "Step moved down."
+                    }
+                    2 -> {
+                        steps.removeAt(index)
+                        status.text = "Step deleted."
+                    }
+                }
+                renderSteps()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     private fun confirmStart() {
@@ -198,29 +259,114 @@ class MainActivity : Activity() {
             status.text = "Workflow not found. Enter the exact saved profile name."
             return
         }
-        val decoded = encoded.lines().mapNotNull { WorkflowStep.decode(it) }
-        if (decoded.isEmpty() || decoded.size > 50) {
-            status.text = "Saved workflow is invalid or exceeds the 50-step limit."
+        val decoded = decodeWorkflow(encoded)
+        if (decoded == null) {
+            status.text = "Saved workflow is invalid. The current workflow was not changed."
             return
         }
-        steps.clear()
-        steps.addAll(decoded)
-        renderSteps()
+        replaceSteps(decoded)
         status.text = "Workflow loaded: $name"
+    }
+
+    private fun exportWorkflow() {
+        if (steps.isEmpty()) {
+            status.text = "Add at least one step before exporting."
+            return
+        }
+        pendingExport = (listOf("AIA_WORKFLOW_V1") + steps.map { it.encode() }).joinToString("\n")
+        val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TITLE, "${safeFileName(profileInput.text.toString())}.aiaworkflow")
+        }
+        startActivityForResult(intent, REQUEST_EXPORT)
+    }
+
+    private fun importWorkflow() {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "text/plain"
+        }
+        startActivityForResult(intent, REQUEST_IMPORT)
+    }
+
+    @Deprecated("Uses document picker result for compatibility with the current minimum SDK")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (resultCode != RESULT_OK || data?.data == null) {
+            pendingExport = null
+            return
+        }
+        val uri = data.data ?: return
+        when (requestCode) {
+            REQUEST_EXPORT -> writeWorkflow(uri)
+            REQUEST_IMPORT -> readWorkflow(uri)
+        }
+    }
+
+    private fun writeWorkflow(uri: Uri) {
+        val payload = pendingExport ?: return
+        pendingExport = null
+        try {
+            contentResolver.openOutputStream(uri)?.bufferedWriter()?.use { it.write(payload) }
+                ?: throw IllegalStateException("Unable to open destination")
+            status.text = "Workflow exported. Keep the file somewhere you can find it."
+        } catch (error: Exception) {
+            status.text = "Export failed: ${error.localizedMessage ?: "storage error"}"
+        }
+    }
+
+    private fun readWorkflow(uri: Uri) {
+        try {
+            val content = contentResolver.openInputStream(uri)?.bufferedReader()?.use { reader ->
+                reader.readText().take(MAX_IMPORT_CHARS + 1)
+            } ?: throw IllegalStateException("Unable to open selected file")
+            if (content.length > MAX_IMPORT_CHARS) {
+                status.text = "Import rejected: file is too large."
+                return
+            }
+            val decoded = decodeWorkflow(content)
+            if (decoded == null) {
+                status.text = "Import rejected: unsupported or invalid workflow file."
+                return
+            }
+            replaceSteps(decoded)
+            status.text = "Workflow imported successfully. Review the steps before running."
+        } catch (error: Exception) {
+            status.text = "Import failed: ${error.localizedMessage ?: "file error"}"
+        }
+    }
+
+    private fun decodeWorkflow(content: String): List<WorkflowStep>? {
+        val lines = content.trim().lines()
+        if (lines.size !in 2..51 || lines.first() != "AIA_WORKFLOW_V1") return null
+        val decoded = lines.drop(1).map { WorkflowStep.decode(it) ?: return null }
+        return decoded.takeIf { it.isNotEmpty() && it.size <= 50 }
+    }
+
+    private fun replaceSteps(newSteps: List<WorkflowStep>) {
+        steps.clear()
+        steps.addAll(newSteps)
+        renderSteps()
+    }
+
+    private fun safeFileName(value: String): String {
+        val cleaned = value.trim().replace(Regex("[^A-Za-z0-9_-]"), "_")
+        return cleaned.ifEmpty { "workflow" }.take(40)
     }
 
     private fun renderSteps() {
         stepsView.text = if (steps.isEmpty()) {
             "Workflow steps: none"
         } else {
-            "Workflow steps ( ${steps.size}/50 ):\n" +
+            "Workflow steps (${steps.size}/50):\n" +
                 steps.mapIndexed { index, step -> "${index + 1}. ${step.displayText()}" }
                     .joinToString("\n")
         }
     }
 
     private fun invalidInput() {
-        status.text = "Invalid input. Coordinates must be non-negative; check the duration limits."
+        status.text = "Invalid input. Check coordinate and duration limits."
     }
 
     private fun refreshStatus() {
@@ -247,4 +393,10 @@ class MainActivity : Activity() {
         ViewGroup.LayoutParams.MATCH_PARENT,
         ViewGroup.LayoutParams.WRAP_CONTENT
     )
+
+    companion object {
+        private const val REQUEST_EXPORT = 4101
+        private const val REQUEST_IMPORT = 4102
+        private const val MAX_IMPORT_CHARS = 20_000
+    }
 }
