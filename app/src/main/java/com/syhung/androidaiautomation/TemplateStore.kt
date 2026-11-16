@@ -22,13 +22,19 @@ object TemplateStore {
             ?: throw IllegalArgumentException("Cannot open selected image.")
         val bitmap = source.use { BitmapFactory.decodeStream(it) }
             ?: throw IllegalArgumentException("Selected file is not a readable image.")
-        require(bitmap.width >= 8 && bitmap.height >= 8 && bitmap.width <= 6000 && bitmap.height <= 6000)
-        val target = File(directory(context), "$name.png")
-        FileOutputStream(target).use { output ->
-            check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, output))
+        try {
+            require(bitmap.width >= 8 && bitmap.height >= 8 && bitmap.width <= 6000 && bitmap.height <= 6000)
+            val target = File(directory(context), "$name.png")
+            FileOutputStream(target).use { output ->
+                check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, output))
+            }
+            require(target.length() <= 8L * 1024 * 1024) {
+                "Image template exceeds the 8 MB storage limit."
+            }
+            return name
+        } finally {
+            bitmap.recycle()
         }
-        bitmap.recycle()
-        return name
     }
 
     fun delete(context: Context, name: String): Boolean {
