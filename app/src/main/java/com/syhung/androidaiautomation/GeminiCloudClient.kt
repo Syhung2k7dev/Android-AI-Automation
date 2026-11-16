@@ -25,6 +25,7 @@ object GeminiCloudClient {
     private const val MAX_ATTEMPTS = 3
     private const val FAILURE_THRESHOLD = 5
     private const val OPEN_MS = 5 * 60 * 1000L
+    private class HttpStatusException(val statusCode: Int, message: String) : IOException(message)
 
     @Synchronized
     fun ask(context: Context, apiKey: String, prompt: String): GeminiReply =
@@ -90,12 +91,11 @@ object GeminiCloudClient {
                 return reply
             } catch (error: Exception) {
                 lastError = error
-                val retryable = error is IOException ||
-                    error.message?.startsWith("HTTP 429") == true ||
-                    error.message?.startsWith("HTTP 500") == true ||
-                    error.message?.startsWith("HTTP 502") == true ||
-                    error.message?.startsWith("HTTP 503") == true ||
-                    error.message?.startsWith("HTTP 504") == true
+                val retryable = if (error is HttpStatusException) {
+                    error.statusCode == 429 || error.statusCode in 500..599
+                } else {
+                    error is IOException
+                }
                 if (!retryable || attempt == MAX_ATTEMPTS - 1) break
                 Thread.sleep(1_000L shl attempt)
             }
@@ -166,7 +166,7 @@ object GeminiCloudClient {
                 val message = try {
                     JSONObject(response).optJSONObject("error")?.optString("message")
                 } catch (_: Exception) { null }
-                throw IOException("HTTP $code: ${message ?: "Gemini request rejected"}")
+                throw HttpStatusException(code, "HTTP $code: ${message ?: "Gemini request rejected"}")
             }
 
             val root = JSONObject(response)
