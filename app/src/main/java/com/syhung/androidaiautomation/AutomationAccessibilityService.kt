@@ -271,6 +271,8 @@ class AutomationAccessibilityService : AccessibilityService() {
                         Toast.makeText(this@AutomationAccessibilityService, "Saved image template is missing or invalid.", Toast.LENGTH_LONG).show()
                         return
                     }
+                    val capturedWidth = bitmap.width
+                    val capturedHeight = bitmap.height
                     Thread {
                         val result = try {
                             val native = OpenCvImageMatcher.match(screen, template, condition.threshold)
@@ -820,7 +822,7 @@ class AutomationAccessibilityService : AccessibilityService() {
                         } finally {
                             bitmap.recycle()
                         }
-                        saveGeminiAnalysis(result, bitmap.width, bitmap.height)
+                        saveGeminiAnalysis(result, capturedWidth, capturedHeight)
                     }.start()
                 }
 
