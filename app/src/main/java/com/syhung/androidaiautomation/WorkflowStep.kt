@@ -59,7 +59,7 @@ sealed class WorkflowStep {
                     val text = parts[1].trim()
                     val timeout = parts[2].toLongOrNull()
                     val poll = parts[3].toLongOrNull()
-                    if (text.isNotEmpty() && text.length <= 80 && !text.contains('\\n') &&
+                    if (text.isNotEmpty() && text.length <= 80 && !text.contains('\n') &&
                         timeout != null && timeout in 1_000L..120_000L &&
                         poll != null && poll in 1_000L..10_000L && poll <= timeout
                     ) WaitForText(text, timeout, poll) else null
