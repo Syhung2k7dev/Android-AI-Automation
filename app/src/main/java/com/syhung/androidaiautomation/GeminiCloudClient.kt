@@ -32,7 +32,27 @@ object GeminiCloudClient {
     @Synchronized
     fun analyzeImage(context: Context, apiKey: String, prompt: String, image: Bitmap): GeminiReply {
         require(prompt.isNotBlank() && prompt.length <= 4_000)
-        return askInternal(context, apiKey, prompt, image)
+        val first = askInternal(context, apiKey, prompt, image)
+        val valid = try {
+            val json = JSONObject(first.text)
+            json.has("summary") && json.has("visible_controls") &&
+                json.has("possible_blocker") && json.has("suggested_next_step")
+        } catch (_: Exception) { false }
+        if (valid) return first
+        val corrected = askInternal(
+            context,
+            apiKey,
+            "Repair the following visual analysis into one valid JSON object with exactly these keys: summary, visible_controls, possible_blocker, suggested_next_step. Do not add markdown fences or any instructions to execute actions. Input: ${first.text.take(3_000)}",
+            null
+        )
+        try {
+            val json = JSONObject(corrected.text)
+            require(json.has("summary") && json.has("visible_controls") &&
+                json.has("possible_blocker") && json.has("suggested_next_step"))
+        } catch (_: Exception) {
+            throw IOException("Gemini returned an invalid visual-analysis schema.")
+        }
+        return corrected
     }
 
     private fun askInternal(context: Context, apiKey: String, prompt: String, image: Bitmap?): GeminiReply {
@@ -113,13 +133,15 @@ object GeminiCloudClient {
                     if (resized !== image) resized.recycle()
                 }
             }
+            val generationConfig = JSONObject()
+                .put("temperature", 0.1)
+                .put("maxOutputTokens", if (image != null) 512 else 128)
+            if (image != null) generationConfig.put("responseMimeType", "application/json")
             val body = JSONObject()
                 .put("contents", org.json.JSONArray().put(
                     JSONObject().put("parts", contentParts)
                 ))
-                .put("generationConfig", JSONObject()
-                    .put("temperature", 0.1)
-                    .put("maxOutputTokens", 128))
+                .put("generationConfig", generationConfig)
             connection.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
 
             val code = connection.responseCode
