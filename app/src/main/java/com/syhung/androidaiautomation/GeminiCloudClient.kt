@@ -38,20 +38,22 @@ object GeminiCloudClient {
         val valid = try {
             val json = JSONObject(first.text)
             json.has("summary") && json.has("visible_controls") &&
-                json.has("possible_blocker") && json.has("suggested_next_step")
+                json.has("possible_blocker") && json.has("suggested_next_step") &&
+                json.optJSONArray("template_candidates") != null
         } catch (_: Exception) { false }
         if (valid) return first
         val corrected = askInternal(
             context,
             apiKey,
-            "Repair the following visual analysis into one valid JSON object with exactly these keys: summary, visible_controls, possible_blocker, suggested_next_step. Do not add markdown fences or any instructions to execute actions. Input: ${first.text.take(3_000)}",
+            "Repair the following visual analysis into valid JSON with keys summary, visible_controls, possible_blocker, suggested_next_step, template_candidates. template_candidates must be an array of zero to five objects with label and bounds [left,top,right,bottom] normalized to 0..1000. Only suggest clearly visible, non-sensitive UI controls. Do not include passwords, personal data, or gesture instructions. Do not add markdown fences. Input: ${first.text.take(3_000)}",
             null,
             true
         )
         try {
             val json = JSONObject(corrected.text)
             require(json.has("summary") && json.has("visible_controls") &&
-                json.has("possible_blocker") && json.has("suggested_next_step"))
+                json.has("possible_blocker") && json.has("suggested_next_step") &&
+                json.optJSONArray("template_candidates") != null)
         } catch (_: Exception) {
             throw IOException("Gemini returned an invalid visual-analysis schema.")
         }
