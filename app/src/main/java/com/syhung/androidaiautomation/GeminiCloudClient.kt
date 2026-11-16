@@ -1,6 +1,9 @@
 package com.syhung.androidaiautomation
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.util.Base64
+import java.io.ByteArrayOutputStream
 import org.json.JSONObject
 import java.io.IOException
 import java.net.HttpURLConnection
@@ -23,7 +26,16 @@ object GeminiCloudClient {
     private const val OPEN_MS = 5 * 60 * 1000L
 
     @Synchronized
-    fun ask(context: Context, apiKey: String, prompt: String): GeminiReply {
+    fun ask(context: Context, apiKey: String, prompt: String): GeminiReply =
+        askInternal(context, apiKey, prompt, null)
+
+    @Synchronized
+    fun analyzeImage(context: Context, apiKey: String, prompt: String, image: Bitmap): GeminiReply {
+        require(prompt.isNotBlank() && prompt.length <= 4_000)
+        return askInternal(context, apiKey, prompt, image)
+    }
+
+    private fun askInternal(context: Context, apiKey: String, prompt: String, image: Bitmap?): GeminiReply {
         require(prompt.isNotBlank() && prompt.length <= 4_000)
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val now = System.currentTimeMillis()
@@ -35,7 +47,7 @@ object GeminiCloudClient {
         var lastError: Exception? = null
         for (attempt in 0 until MAX_ATTEMPTS) {
             try {
-                val reply = request(apiKey, prompt)
+                val reply = request(apiKey, prompt, image)
                 prefs.edit()
                     .putInt("failures", 0)
                     .putLong("open_until", 0L)
@@ -70,7 +82,7 @@ object GeminiCloudClient {
         return "Requests: ${p.getLong("requests", 0L)} | Input tokens: ${p.getLong("input_tokens", 0L)} | Output tokens: ${p.getLong("output_tokens", 0L)}"
     }
 
-    private fun request(apiKey: String, prompt: String): GeminiReply {
+    private fun request(apiKey: String, prompt: String, image: Bitmap?): GeminiReply {
         val connection = (URL(ENDPOINT).openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             connectTimeout = 15_000
@@ -81,10 +93,29 @@ object GeminiCloudClient {
         }
 
         try {
-            val parts = JSONObject().put("text", prompt)
+            val contentParts = org.json.JSONArray().put(JSONObject().put("text", prompt))
+            if (image != null) {
+                val scale = minOf(1.0, 1024.0 / maxOf(image.width, image.height).toDouble())
+                val resized = if (scale < 1.0) Bitmap.createScaledBitmap(
+                    image,
+                    (image.width * scale).toInt().coerceAtLeast(1),
+                    (image.height * scale).toInt().coerceAtLeast(1),
+                    true
+                ) else image
+                val output = ByteArrayOutputStream()
+                try {
+                    check(resized.compress(Bitmap.CompressFormat.JPEG, 78, output))
+                    val encoded = Base64.encodeToString(output.toByteArray(), Base64.NO_WRAP)
+                    contentParts.put(JSONObject().put("inlineData",
+                        JSONObject().put("mimeType", "image/jpeg").put("data", encoded)))
+                } finally {
+                    output.close()
+                    if (resized !== image) resized.recycle()
+                }
+            }
             val body = JSONObject()
                 .put("contents", org.json.JSONArray().put(
-                    JSONObject().put("parts", org.json.JSONArray().put(parts))
+                    JSONObject().put("parts", contentParts)
                 ))
                 .put("generationConfig", JSONObject()
                     .put("temperature", 0.1)
