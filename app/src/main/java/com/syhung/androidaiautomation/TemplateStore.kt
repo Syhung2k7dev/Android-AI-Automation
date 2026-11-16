@@ -31,6 +31,11 @@ object TemplateStore {
         return name
     }
 
+    fun delete(context: Context, name: String): Boolean {
+        if (!name.matches(Regex("[A-Za-z0-9_-]{1,40}"))) return false
+        return File(directory(context), "$name.png").delete()
+    }
+
     fun load(context: Context, name: String): Bitmap? {
         if (!name.matches(Regex("[A-Za-z0-9_-]{1,40}"))) return null
         val file = File(directory(context), "$name.png")
