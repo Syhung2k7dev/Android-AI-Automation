@@ -28,12 +28,12 @@ object GeminiCloudClient {
 
     @Synchronized
     fun ask(context: Context, apiKey: String, prompt: String): GeminiReply =
-        askInternal(context, apiKey, prompt, null)
+        askInternal(context, apiKey, prompt, null, false)
 
     @Synchronized
     fun analyzeImage(context: Context, apiKey: String, prompt: String, image: Bitmap): GeminiReply {
         require(prompt.isNotBlank() && prompt.length <= 4_000)
-        val first = askInternal(context, apiKey, prompt, image)
+        val first = askInternal(context, apiKey, prompt, image, true)
         val valid = try {
             val json = JSONObject(first.text)
             json.has("summary") && json.has("visible_controls") &&
@@ -44,7 +44,8 @@ object GeminiCloudClient {
             context,
             apiKey,
             "Repair the following visual analysis into one valid JSON object with exactly these keys: summary, visible_controls, possible_blocker, suggested_next_step. Do not add markdown fences or any instructions to execute actions. Input: ${first.text.take(3_000)}",
-            null
+            null,
+            true
         )
         try {
             val json = JSONObject(corrected.text)
@@ -56,7 +57,7 @@ object GeminiCloudClient {
         return corrected
     }
 
-    private fun askInternal(context: Context, apiKey: String, prompt: String, image: Bitmap?): GeminiReply {
+    private fun askInternal(context: Context, apiKey: String, prompt: String, image: Bitmap?, forceJson: Boolean): GeminiReply {
         require(prompt.isNotBlank() && prompt.length <= 4_000)
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val now = System.currentTimeMillis()
@@ -68,7 +69,7 @@ object GeminiCloudClient {
         var lastError: Exception? = null
         for (attempt in 0 until MAX_ATTEMPTS) {
             try {
-                val reply = request(apiKey, prompt, image)
+                val reply = request(apiKey, prompt, image, forceJson)
                 val requestNow = System.currentTimeMillis()
                 val oldTimes = try { JSONArray(prefs.getString("request_times", "[]")) } catch (_: Exception) { JSONArray() }
                 val recentTimes = JSONArray()
@@ -116,7 +117,7 @@ object GeminiCloudClient {
         return "RPM: $rpm | Total requests: ${p.getLong("requests", 0L)} | Input tokens: ${p.getLong("input_tokens", 0L)} | Output tokens: ${p.getLong("output_tokens", 0L)} | Total tokens: ${p.getLong("total_tokens", 0L)}"
     }
 
-    private fun request(apiKey: String, prompt: String, image: Bitmap?): GeminiReply {
+    private fun request(apiKey: String, prompt: String, image: Bitmap?, forceJson: Boolean): GeminiReply {
         val connection = (URL(ENDPOINT).openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             connectTimeout = 15_000
@@ -150,7 +151,7 @@ object GeminiCloudClient {
             val generationConfig = JSONObject()
                 .put("temperature", 0.1)
                 .put("maxOutputTokens", if (image != null) 512 else 128)
-            if (image != null) generationConfig.put("responseMimeType", "application/json")
+            if (forceJson) generationConfig.put("responseMimeType", "application/json")
             val body = JSONObject()
                 .put("contents", org.json.JSONArray().put(
                     JSONObject().put("parts", contentParts)
