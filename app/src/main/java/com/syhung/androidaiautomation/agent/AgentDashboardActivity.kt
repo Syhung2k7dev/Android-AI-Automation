@@ -221,12 +221,30 @@ class AgentDashboardActivity : Activity() {
     }
 
     private fun browseSkills() {
-        val rows = skills.listRecent().joinToString("\n\n") {
-            it.skillId + " · revision " + it.revision + " · " + it.status + "\n" + it.manifest.take(240)
+        val items = skills.listRecent()
+        if (items.isEmpty()) {
+            AlertDialog.Builder(this).setTitle("Skill registry").setMessage("No skill drafts saved yet.")
+                .setPositiveButton("Close", null).show()
+            return
         }
+        val labels = items.map { it.skillId + " · r" + it.revision + " · " + it.status }.toTypedArray()
         AlertDialog.Builder(this).setTitle("Skill registry")
-            .setMessage(rows.ifBlank { "No skill drafts saved yet." })
-            .setPositiveButton("Close", null).show()
+            .setItems(labels) { _, index ->
+                val selected = items[index]
+                AlertDialog.Builder(this)
+                    .setTitle(selected.skillId + " · revision " + selected.revision)
+                    .setMessage("Status: " + selected.status + "\n\nManifest:\n" + selected.manifest.take(1200) +
+                        "\n\nWorkflow:\n" + selected.workflow.take(1200) +
+                        "\n\nActivation requires your explicit confirmation. Activation does not grant unregistered capabilities.")
+                    .setNegativeButton("Close", null)
+                    .setPositiveButton(if (selected.status == "active") "Already active" else "Approve and activate") { _, _ ->
+                        if (selected.status != "active" && skills.activate(selected.skillId, selected.revision, true)) {
+                            status.text = "Skill activated: " + selected.skillId + " revision " + selected.revision
+                        } else if (selected.status != "active") {
+                            status.text = "Skill activation failed validation."
+                        }
+                    }.show()
+            }.setNegativeButton("Close", null).show()
     }
 
     @Deprecated("Use Activity Result APIs in a future UI refactor")
