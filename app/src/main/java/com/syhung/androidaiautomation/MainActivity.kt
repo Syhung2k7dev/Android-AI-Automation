@@ -24,6 +24,7 @@ class MainActivity : Activity() {
     private lateinit var durationInput: EditText
     private lateinit var waitInput: EditText
     private lateinit var repeatInput: EditText
+    private lateinit var conditionTextInput: EditText
     private lateinit var stepsView: TextView
     private val steps = mutableListOf<WorkflowStep>()
     private var pendingExport: String? = null
@@ -60,10 +61,11 @@ class MainActivity : Activity() {
         durationInput = field("Tap / swipe duration in ms (50–10000)", "300")
         waitInput = field("Wait duration in ms (100–60000)", "1000")
         repeatInput = field("Repeat workflow (1–20)", "1")
+        conditionTextInput = field("Wait until this text appears (max 80 characters)", "Ready")
 
         listOf(
             profileInput, xInput, yInput, endXInput, endYInput,
-            durationInput, waitInput, repeatInput
+            durationInput, waitInput, repeatInput, conditionTextInput
         ).forEach { root.addView(it, matchWidth()) }
 
         root.addView(button("Select tap point visually") { armPointSelection("tap") }, matchWidth())
@@ -72,6 +74,7 @@ class MainActivity : Activity() {
         root.addView(button("Add tap step") { addTap() }, matchWidth())
         root.addView(button("Add swipe step") { addSwipe() }, matchWidth())
         root.addView(button("Add wait step") { addWait() }, matchWidth())
+        root.addView(button("Add wait-for-text condition") { addWaitForText() }, matchWidth())
         root.addView(button("Manage / reorder steps") { manageStep() }, matchWidth())
         root.addView(button("Clear workflow") {
             if (steps.isNotEmpty()) {
@@ -114,7 +117,7 @@ class MainActivity : Activity() {
         }, matchWidth())
 
         root.addView(TextView(this).apply {
-            text = "Local workflow editor: create, reorder, save, import and export tap, swipe and wait steps. Use visual point selection to capture coordinates from an authorized screen. The picker opens after a 10-second switch window and temporarily intercepts one tap to record its position. Workflows stay on this device unless you explicitly export a file. Each run requires confirmation and has a 5-second countdown. Limit: 50 steps and 20 repeats. Screen text recognition is available only after a separate confirmation; it captures one screenshot and processes it locally with a bundled model. No cloud AI service is used."
+            text = "Local workflow editor: create, reorder, save, import and export tap, swipe, wait, and OCR text-condition steps. Use visual point selection to capture coordinates from an authorized screen. The picker opens after a 10-second switch window and temporarily intercepts one tap to record its position. Workflows stay on this device unless you explicitly export a file. Each run requires confirmation and has a 5-second countdown. Limit: 50 steps and 20 repeats. Screen text recognition is available only after a separate confirmation; it captures one screenshot and processes it locally with a bundled model. No cloud AI service is used."
             textSize = 13f
             setPadding(0, 18, 0, 0)
         }, matchWidth())
@@ -233,6 +236,15 @@ class MainActivity : Activity() {
         val duration = waitInput.text.toString().toLongOrNull()
             ?.takeIf { it in 100L..60_000L } ?: return invalidInput()
         addStep(WorkflowStep.Wait(duration))
+    }
+
+    private fun addWaitForText() {
+        val textToFind = conditionTextInput.text.toString().trim()
+        if (textToFind.isEmpty() || textToFind.length > 80 || textToFind.contains('|') || textToFind.contains('\n')) {
+            status.text = "Enter text up to 80 characters without separator characters."
+            return
+        }
+        addStep(WorkflowStep.WaitForText(textToFind, 30_000L, 2_000L))
     }
 
     private fun addStep(step: WorkflowStep) {
