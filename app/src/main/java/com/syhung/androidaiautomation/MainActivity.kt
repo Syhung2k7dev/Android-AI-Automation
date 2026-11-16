@@ -375,6 +375,7 @@ class MainActivity : Activity() {
         if (pending != null) {
             alarm.cancel(pending)
             pending.cancel()
+            getSharedPreferences("scheduler_state", MODE_PRIVATE).edit().clear().apply()
             status.text = "Scheduled cooldown reminder cancelled."
         } else {
             status.text = "There is no pending cooldown reminder."
