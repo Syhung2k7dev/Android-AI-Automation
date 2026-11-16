@@ -1,55 +1,62 @@
 # Android AI Automation
 
-An independent Android automation project targeting Android 13+ and devices such as the Oppo Reno6 Z 5G. The app is designed around explicit user control and local-first execution.
+An independent Android automation prototype built around explicit user control and local-first workflows. Initial device target: Oppo Reno6 Z 5G running Android 13 / ColorOS. No root is required.
 
 ## Current implementation
 
-The current development build is an early prototype, not the complete product.
+- Android Accessibility Service used only for user-started tap and swipe gestures.
+- Multi-step workflow editor with tap, swipe, and wait actions.
+- Reorder and delete individual workflow steps.
+- Save and load named workflows locally.
+- Saved workflow library with explicit delete confirmation.
+- Import and export workflow files through Android's document picker.
+- Validation of imported step types, coordinates, durations, workflow size, and step count.
+- Explicit run confirmation, five-second start delay, finite repeats, and Stop control.
+- Current workflow limits: 50 steps and 20 repeats.
+- No screen-content retrieval, OCR, image matching, or cloud AI connection in this build.
 
-Implemented:
-- Accessibility service declaration for user-authorized gesture automation.
-- Coordinate-based tap sequences with a minimum 500 ms interval and a bounded tap count.
-- Start and stop controls.
-- Local save/load of named coordinate-tap profiles.
+This is still an early development build, not the complete product. The current coordinate entry is manual; visual point selection is not yet implemented.
 
-Not implemented yet:
-- Visual tap-point selection and overlay controls.
+## Not implemented
+
+- Visual point selection and overlay controls.
 - On-device image matching.
 - Offline OCR.
-- A validated automation-script format and editor.
 - Scheduling and foreground execution controls.
 - Optional AI-assisted recovery.
 - Multi-account workflow management.
+- Production release signing and distribution review.
 
-## Device and platform target
+## Platform target
 
 - Initial target: Oppo Reno6 Z 5G, Android 13 / ColorOS.
 - Minimum Android version: Android 8.0 (API 26).
 - No root requirement.
-- A computer is not required to use the installed app.
+- A computer is not required to use an installed APK.
 
 ## Security and permissions
 
-The app uses Android Accessibility only for actions explicitly started by the user. It must not attempt to hide its operation, bypass Android security controls, evade Play Protect, or bypass anti-cheat and other protected-system safeguards.
+The app uses Accessibility only for actions explicitly started by the user. It must not hide its operation, bypass Android security controls, evade Play Protect, bypass anti-cheat systems, or interact with protected screens without authorization.
 
-A Play Protect warning must be investigated before distributing or using a build. Do not disable device protection or grant Accessibility to a build that Android identifies as harmful. Debug APKs are development artifacts and are not equivalent to a reviewed production release.
+A Play Protect warning must be investigated before distributing or using a build. Do not disable device protection or grant Accessibility to a build Android identifies as harmful. Debug APKs are development artifacts, not reviewed production releases.
 
-Accessibility availability depends on Android and device-manufacturer security policy. A service declaration alone does not prove that a particular APK is safe or that ColorOS will allow it to be enabled.
+Accessibility availability depends on Android and device-manufacturer security policy. A service declaration does not prove that a particular APK is safe or that ColorOS will allow it to be enabled.
+
+Workflow files are plain text and may contain user-configured screen coordinates. Export them only to locations you trust. Imported files are size-limited and validated before they can replace the current workflow.
 
 ## Build status
 
-GitHub Actions builds a debug APK when changes are pushed to `main`. A successful source commit does not by itself mean that the APK built successfully; check the Actions run and its uploaded artifact.
+GitHub Actions builds a debug APK for pull requests and pushes to `main`. Check the Actions run and uploaded artifact for the exact commit; a successful source edit alone does not prove that the APK built successfully.
 
 ## Development approach
 
-The implementation is original and does not copy Smart AutoClicker's source. The project may use its publicly described architectural ideas as reference. Any future third-party code or dependency must have its license reviewed before inclusion.
+The implementation is original and does not copy Smart AutoClicker's source. Any future third-party code or dependency must have its license reviewed before inclusion.
 
-## Planned milestones
+## Roadmap
 
-1. Stable build and device compatibility checks.
-2. Clear Accessibility connection and permission-state diagnostics.
-3. Visual point selection and transparent overlay controls.
-4. Local image matching and offline OCR.
-5. Validated automation profiles and scheduling.
-6. Optional, bounded AI-assisted recovery.
-7. Release signing, distribution review, and security verification.
+1. Device compatibility and execution reliability checks.
+2. Better coordinate calibration and user-guided point selection.
+3. Local image matching and offline OCR, subject to platform permissions and transparent consent.
+4. Scheduling with visible status and reliable cancellation.
+5. Optional, bounded AI-assisted recovery.
+6. Release signing, distribution review, and security verification.
