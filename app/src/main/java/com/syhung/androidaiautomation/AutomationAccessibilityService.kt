@@ -6,6 +6,7 @@ import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.BitmapFactory
 import android.graphics.Path
+import android.graphics.Rect
 import android.graphics.PixelFormat
 import android.os.Handler
 import android.os.Looper
@@ -41,6 +42,7 @@ class AutomationAccessibilityService : AccessibilityService() {
     private var pointPickerTarget: String? = null
     private var ocrCaptureRunnable: Runnable? = null
     private var cloudAnalysisRunnable: Runnable? = null
+    private var templateLearningRunnable: Runnable? = null
     private var conditionPollRunnable: Runnable? = null
     private var conditionDeadline = 0L
     private var conditionCaptureInFlight = false
@@ -70,6 +72,7 @@ class AutomationAccessibilityService : AccessibilityService() {
         cancelPointPicker()
         cancelOcrCapture()
         cancelGeminiAnalysis()
+        cancelTemplateLearning()
         removeDashboard()
         if (instance === this) instance = null
         super.onDestroy()
@@ -722,6 +725,58 @@ class AutomationAccessibilityService : AccessibilityService() {
         }
     }
 
+    private fun captureTemplateRegion(name: String, left: Int, top: Int, right: Int, bottom: Int) {
+        templateLearningRunnable = null
+        try {
+            takeScreenshot(Display.DEFAULT_DISPLAY, mainExecutor, object : TakeScreenshotCallback {
+                override fun onSuccess(screenshot: ScreenshotResult) {
+                    val buffer = screenshot.hardwareBuffer
+                    val screen = try {
+                        Bitmap.wrapHardwareBuffer(buffer, screenshot.colorSpace)?.copy(Bitmap.Config.ARGB_8888, false)
+                    } catch (_: Exception) { null } finally { buffer.close() }
+                    if (screen == null) {
+                        Toast.makeText(this@AutomationAccessibilityService, "Could not capture screen for template learning.", Toast.LENGTH_LONG).show()
+                        return
+                    }
+                    val x1 = left.coerceIn(0, screen.width)
+                    val y1 = top.coerceIn(0, screen.height)
+                    val x2 = right.coerceIn(0, screen.width)
+                    val y2 = bottom.coerceIn(0, screen.height)
+                    val cropLeft = minOf(x1, x2)
+                    val cropTop = minOf(y1, y2)
+                    val cropWidth = kotlin.math.abs(x2 - x1)
+                    val cropHeight = kotlin.math.abs(y2 - y1)
+                    if (cropWidth < 8 || cropHeight < 8) {
+                        screen.recycle()
+                        Toast.makeText(this@AutomationAccessibilityService, "Selected template region is too small or outside the screen.", Toast.LENGTH_LONG).show()
+                        return
+                    }
+                    val crop = Bitmap.createBitmap(screen, cropLeft, cropTop, cropWidth, cropHeight)
+                    screen.recycle()
+                    try {
+                        TemplateStore.saveBitmap(this@AutomationAccessibilityService, crop, name)
+                        Toast.makeText(this@AutomationAccessibilityService, "Template learned locally: $name", Toast.LENGTH_LONG).show()
+                    } catch (error: Exception) {
+                        Toast.makeText(this@AutomationAccessibilityService, "Template could not be saved: ${error.localizedMessage ?: "storage error"}", Toast.LENGTH_LONG).show()
+                    } finally {
+                        crop.recycle()
+                    }
+                }
+
+                override fun onFailure(errorCode: Int) {
+                    Toast.makeText(this@AutomationAccessibilityService, "Screen capture blocked ($errorCode); no template saved.", Toast.LENGTH_LONG).show()
+                }
+            })
+        } catch (error: Exception) {
+            Toast.makeText(this, "Template capture failed: ${error.localizedMessage ?: "unknown error"}", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun cancelTemplateLearning() {
+        templateLearningRunnable?.let(handler::removeCallbacks)
+        templateLearningRunnable = null
+    }
+
     private fun captureScreenForGeminiAnalysis() {
         cloudAnalysisRunnable = null
         val key = try { CloudKeyStore.read(this) } catch (_: Exception) { null }
@@ -942,6 +997,24 @@ class AutomationAccessibilityService : AccessibilityService() {
             return true
         }
 
+        fun armTemplateLearning(name: String, x1: Int, y1: Int, x2: Int, y2: Int): Boolean {
+            val service = instance ?: return false
+            if (!name.matches(Regex("[A-Za-z0-9_-]{1,40}")) ||
+                minOf(x1, x2) < 0 || minOf(y1, y2) < 0 ||
+                kotlin.math.abs(x2 - x1) < 8 || kotlin.math.abs(y2 - y1) < 8
+            ) return false
+            service.cancelTemplateLearning()
+            service.cancelPointPicker()
+            service.cancelOcrCapture()
+            service.stopSequence()
+            Toast.makeText(service, "Switch to the intended screen. The selected rectangle will be saved locally in 8 seconds.", Toast.LENGTH_LONG).show()
+            service.templateLearningRunnable = Runnable {
+                service.captureTemplateRegion(name, x1, y1, x2, y2)
+            }
+            service.handler.postDelayed(service.templateLearningRunnable!!, OCR_CAPTURE_DELAY_MS)
+            return true
+        }
+
         fun armGeminiAnalysis(): Boolean {
             val service = instance ?: return false
             val key = try { CloudKeyStore.read(service) } catch (_: Exception) { null }
@@ -1012,6 +1085,7 @@ class AutomationAccessibilityService : AccessibilityService() {
                 it.cancelPointPicker()
                 it.cancelOcrCapture()
                 it.cancelGeminiAnalysis()
+                it.cancelTemplateLearning()
             }
         }
     }
