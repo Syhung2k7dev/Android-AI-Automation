@@ -70,7 +70,7 @@ class MainActivity : Activity() {
             if (values == null) {
                 status.text = "Invalid values. Check coordinates, interval and tap count."
             } else if (!AutomationAccessibilityService.start(
-                    values.first, values.second, values.third, values.fourth
+                    values.x, values.y, values.interval, values.count
                 )) {
                 status.text = "Accessibility service is not connected. Enable it in Android Settings."
             } else {
