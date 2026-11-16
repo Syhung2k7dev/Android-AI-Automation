@@ -54,7 +54,6 @@ class CaslEngine(private val capabilities: Map<String, CaslCapability>) {
                     "LOOP" -> { val count = step.optInt("count", 0); if (count !in 1..20) return CaslExecutionResult(false, results, "LOOP count must be 1–20"); loopRemaining[pc] = count; pc++ }
                     "END_LOOP" -> { val start = loopStart[pc] ?: return CaslExecutionResult(false, results, "Invalid LOOP block"); val left = (loopRemaining[start] ?: 1) - 1; if (left > 0) { loopRemaining[start] = left; pc = start + 1 } else { loopRemaining.remove(start); pc++ } }
                     "WAIT" -> { val duration = step.optLong("duration_ms", -1); if (duration !in 0..30000) return CaslExecutionResult(false, results, "WAIT duration must be 0–30000 ms"); Thread.sleep(duration); results += CaslStepResult(id, true, JSONObject().put("waited_ms", duration)); pc++ }
-                    "END_LOOP" -> pc++
                     else -> { val provider = capabilities[op] ?: return CaslExecutionResult(false, results, "No capability provider registered for " + op); val output = provider.execute(step.optJSONObject("input") ?: JSONObject()); results += CaslStepResult(id, true, output); pc++ }
                 }
             } catch (_: InterruptedException) { Thread.currentThread().interrupt(); return CaslExecutionResult(false, results, "Execution interrupted") }
