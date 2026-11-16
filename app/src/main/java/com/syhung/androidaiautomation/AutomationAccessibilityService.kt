@@ -533,6 +533,7 @@ class AutomationAccessibilityService : AccessibilityService() {
         conditionDeadline = 0L
         steps = emptyList()
         workflowQueue = emptyList()
+        AutomationForegroundService.stop(this)
         queueIndex = 0
         stepIndex = 0
         repeatIndex = 0
@@ -991,6 +992,12 @@ class AutomationAccessibilityService : AccessibilityService() {
             service.repeatIndex = 0
             service.running = true
             service.paused = false
+            try {
+                AutomationForegroundService.start(service)
+            } catch (_: Exception) {
+                service.stopSequence()
+                return false
+            }
             service.showDashboard()
             service.updateDashboard()
             service.scheduleWatchdog()
