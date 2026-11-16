@@ -58,7 +58,7 @@ class VisionMemoryStore(context: Context, private val repository: CadssRepositor
     fun resolve(assetId: String): File? {
         val record = repository.get(assetId) ?: return null
         val path = JSONObject(record.payload).optString("relative_path")
-        val file = File(root.parentFile, path.substringAfter("vision-memory/"))
+        val file = File(root, path.substringAfter("vision-memory/"))
         return file.takeIf { it.isFile }
     }
 }
