@@ -5,6 +5,8 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import dev.syhung.cocassistant.db.entity.*
+import dev.syhung.cocassistant.db.dao.ContextDao
+import dev.syhung.cocassistant.db.dao.ArtifactDao
 
 @Database(entities = [
     ContextEntity::class,
