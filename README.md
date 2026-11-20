@@ -1,6 +1,10 @@
 # CoC AI Assistant
 
-**CoC AI Assistant** là ứng dụng Android hướng tới mô hình AI Agent điều phối Clash of Clans. Người dùng giao mục tiêu trong **Trung tâm AI**; Agent có thể mở trò chơi, tự chụp màn hình bằng Android Accessibility, chạy OCR cục bộ, phân tích tình huống bằng Gemini và sử dụng CADSS/CASL/Skill để quản lý công việc.
+[![Android](https://img.shields.io/badge/Platform-Android-green.svg)]()
+[![Kotlin](https://img.shields.io/badge/Language-Kotlin-blue.svg)]()
+[![Gradle](https://img.shields.io/badge/Build-Gradle-brightgreen.svg)]()
+
+**CoC AI Assistant** là ứng dụng Android mạnh mẽ sử dụng AI Agent để tự động hóa và hỗ trợ người chơi Clash of Clans. Dự án tích hợp các công nghệ tiên tiến về thị giác máy tính và điều phối quy trình tự động.
 
 ## Trải nghiệm chính
 
