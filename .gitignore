@@ -16,7 +16,11 @@ local.properties
 # Other
 .DS_Store
 .class
-*.apk
 *.ap_
 *.dex
 *.class
+
+# Allow APK in release folder
+*.apk
+!release/*.apk
+
