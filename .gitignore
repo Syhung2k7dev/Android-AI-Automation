@@ -1,0 +1,22 @@
+# Gradle files
+.gradle/
+build/
+app/build/
+**/build/
+
+# IDE files
+.idea/
+.settings/
+.classpath
+.project
+*.iml
+*.iws
+local.properties
+
+# Other
+.DS_Store
+.class
+*.apk
+*.ap_
+*.dex
+*.class
