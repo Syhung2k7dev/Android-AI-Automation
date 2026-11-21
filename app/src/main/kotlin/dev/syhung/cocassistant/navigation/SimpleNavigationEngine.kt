@@ -1,6 +1,7 @@
 package dev.syhung.cocassistant.navigation
 
 import dev.syhung.cocassistant.detector.Scene
+import android.util.Log
 import dev.syhung.cocassistant.service.CocAccessibilityService
 import dev.syhung.cocassistant.touch.TouchActionUtils
 import android.graphics.PointF

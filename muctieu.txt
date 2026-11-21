@@ -1,62 +1,224 @@
-# MỤC TIÊU THỰC THI TỰ ĐỘNG CHO CLINE: CoC-AI-Assistant
-
-Bạn đang làm việc trên dự án Android **CoC-AI-Assistant** tại thư mục hiện tại (`C:\Users\ADMIN\.gemini\antigravity\scratch\CoC-AI-Assistant`).
-Mục tiêu cuối cùng của bạn là biến ứng dụng thành một **Android AI Agent có thể tự động vận hành trong game Clash of Clans (CoC)**, **thực thi đúng yêu cầu người dùng giao trên app**, và **tự động nghiên cứu (Deep Research)** khi gặp tình huống hoặc thao tác chưa biết cách làm.
-
-Hãy tự vận hành vòng lặp **Đọc hiểu → Thiết kế/Sửa code → Build/Test → Kiểm tra lỗi/Log → Sửa lỗi → Lặp lại** cho đến khi hoàn thành từng mốc dưới đây.
+# ĐẶC TẢ KỸ THUẬT TỔNG THỂ & MỤC TIÊU THỰC THI TỰ ĐỘNG CHO CLINE
+## DỰ ÁN: CoC-AI-Assistant (`Syhung2k7dev/CoC-AI-Assistant`) — THƯ MỤC LÀM VIỆC: `C:\duan`
 
 ---
 
-## 1. NGUYÊN TẮC KẾ THỪA & KHÔNG ĐẬP BỎ (INCREMENTAL REFACTORING)
-- **Đọc code trước khi sửa:** Khảo sát cấu trúc hiện tại trong `app/src/main/` và `docs/` trước khi chỉnh sửa.
-- **Tái sử dụng bộ khung hiện có:** Giữ và kế thừa các nền tảng tốt hiện có như **CASL** (JSON AST DSL làm ngôn ngữ kịch bản đầu ra cho cả kỹ năng có sẵn lẫn kỹ năng sinh ra từ Deep Research) và **HVCS** (hệ tọa độ chuẩn hóa `0..1000`), nâng cấp mở rộng thay vì xóa trắng viết lại từ đầu làm gãy hệ thống.
-- **Tương thích Android & CoC:** Clash of Clans vẽ đồ họa bằng OpenGL/Vulkan (không có cây UI XML của game), chạy ngang (Landscape), khác tỷ lệ màn hình, notch/display cutout và thanh điều hướng trên từng thiết bị/giả lập.
+## 0. Tuyên bố sứ mệnh, vai trò của Cline và nguyên tắc vận hành tối cao
+
+### 0.1. Vai trò của Cline
+Bạn là **Kỹ sư trưởng kiến trúc Android AI Agent & Kỹ sư kiểm thử tự động khép kín** làm việc trực tiếp trên mã nguồn dự án **`CoC-AI-Assistant`** tại thư mục **`C:\duan`**[cite: 1]. Nhiệm vụ cốt lõi của bạn là tiếp nhận toàn bộ yêu cầu, bối cảnh dự án, môi trường phát triển, giả lập/thiết bị thực tế, kiến trúc lưu trữ/ngữ cảnh, nhận diện cảnh, thị giác 2 tầng, kỹ năng linh hoạt, tự chữa lành/tự thích ứng và nghiên cứu chuyên sâu kết nối tri thức để **xây dựng lại / hoàn thiện và tự debug liên tục cho đến khi chạy được**[cite: 1].
+
+### 0.2. Hai năng lực quan trọng nhất phải đạt được
+1. **Clash of Clans (CoC) chạy tự động được** trên môi trường/thiết bị hỗ trợ (như **LDPlayer 9**), với luồng điều khiển, nhận thức không gian/cảnh, điều hướng chuyển cảnh, thao tác tự nhiên chống dấu hiệu máy móc, chạy ngầm ổn định, bong bóng nổi điều khiển trực tiếp và bảo vệ thiết bị/tài khoản[cite: 1].
+2. **Thực hiện đúng theo yêu cầu/mục tiêu người dùng giao qua Agent trên ứng dụng**, có khả năng phân rã mục tiêu, lưu trữ/truy xuất ngữ cảnh đa tầng và ngữ cảnh cục bộ, kiểm chứng kết quả sau hành động, và khi gặp tình huống/thao tác/màn hình/sự kiện chưa biết cách làm thì **tự kích hoạt nghiên cứu chuyên sâu (Deep Research)** để tìm hiểu, đối chiếu, thực thi có kiểm soát và đúc kết thành kỹ năng tái sử dụng[cite: 1].
+
+### 0.3. Nguyên tắc tự debug khép kín đến khi chạy được
+* Không dừng lại ở việc viết code nửa vời hay suy đoán suông khi có thể biên dịch, chạy unit test và kiểm tra thực tế qua ADB/logcat[cite: 1].
+* Vận hành liên tục vòng lặp: **Đọc/Khảo sát mã nguồn & tài liệu (`docs/`) → Xóa phần thừa / Thiết kế & Chỉnh sửa mã nguồn → Biên dịch (`./gradlew assembleDebug`) & Chạy kiểm thử (`./gradlew testDebugUnitTest`) → Phân tích lỗi biên dịch / test / logcat / ảnh chụp màn hình → Sửa lỗi triệt để → Lặp lại** cho đến khi build xanh, test đạt và luồng vận hành chạy ổn định[cite: 1].
+* Áp dụng **Luật 3 lần thử (3-Strike Rule)**: nếu cùng một lỗi biên dịch, test hoặc runtime xuất hiện **3 lần liên tiếp** chưa khắc phục được, phải dừng sửa mù quáng, ghi rõ nguyên nhân gốc rễ, chuyển sang phương án đơn giản/an toàn hơn rồi mới tiếp tục[cite: 1].
+* Sau mỗi đợt làm việc/chỉnh sửa, luôn báo cáo ngắn gọn, rõ ràng theo 3 mục: **(1) Đã làm gì**, **(2) Kết quả build / test / adb**, **(3) Lỗi còn tồn đọng & bước tiếp theo**[cite: 1].
 
 ---
 
-## 2. CÁC MỐC MỤC TIÊU BẮT BUỘC (THỰC HIỆN TUẦN TỰ TỪ MỐC 1 ĐẾN MỐC 4)
+## 1. Hồ sơ môi trường, đường dẫn, công cụ và bài học thực chiến từ Log
 
-### Mốc 1: Bộ nhớ cục bộ Room DB & Hệ thống Ngữ cảnh Phân tầng
-- Thay thế/nâng cấp lưu trữ thô dạng JSON trên `SharedPreferences` bằng **Room Database (SQLite)** (kèm lưu trữ ảnh mẫu/crop/artifact an toàn trên bộ nhớ ứng dụng).
-- Xây dựng **4 tầng ngữ cảnh** rõ ràng để điều phối toàn hệ thống và từng kỹ năng:
-  1. **Tầng nguyên tắc/định hướng hệ thống (System / Global Context):** Nguyên tắc vận hành, giới hạn an toàn, chiến lược và định hướng cốt lõi của Agent.
-  2. **Tầng ngữ cảnh điều phối & hoàn cảnh (Agent / Session Context):** Mục tiêu hiện tại người dùng giao, tiến độ sub-task, lịch sử bước đã làm, trạng thái cảnh hiện tại.
-  3. **Tầng dữ liệu thế giới & lịch (World State & Schedule DB):** Cấp độ nhà chính, tài nguyên hiện có, dữ liệu/layout căn cứ, trạng thái/thời gian hoàn thành công trình/thợ xây/quân lính, lịch trình chạy (`WorkManager`).
-  4. **Tầng ngữ cảnh kỹ năng (Skill Context):** Điều kiện tiên quyết (`pre-conditions`), ngữ cảnh riêng của từng kỹ năng, điểm neo/mẫu nhận diện và cách xử lý fallback khi gặp lỗi.
+### 1.1. Các đường dẫn và thông số môi trường thực tế
+* **Thư mục dự án hiện tại:** `C:\duan` (trước đó nằm tại `C:\Users\ADMIN\.gemini\antigravity\scratch\CoC-AI-Assistant`, GitHub `Syhung2k7dev/CoC-AI-Assistant`)[cite: 1].
+* **Android SDK & ADB:** `C:\Users\ADMIN\AppData\Local\Android\Sdk` (trong đó có `platform-tools\adb.exe`)[cite: 1].
+* **Java JDK / JBR:** `C:\linhtinh\adroid\jbr` (Java 21 OpenJDK)[cite: 1].
+* **Gradle:** **Gradle 8.9** (Kotlin DSL `build.gradle.kts`, Android Min SDK 23, Target SDK 35 - Android 15, Kotlin 2.0.21, Jetpack Compose, Material 3, Coroutines & Flow, WorkManager, ML Kit OCR, OpenCV, pHash)[cite: 1].
+* **Giả lập LDPlayer 9:** `C:\LDPlayer\LDPlayer9` (kết nối ADB qua `127.0.0.1:5555`)[cite: 1].
+* **Tài liệu & mã nguồn tham chiếu:** thư mục `docs/` (tài liệu tiếng Việt mô tả kiến trúc ban đầu) và các file/module hiện có trong dự án (bao gồm các nền tảng `CASL`, `HVCS`, `AELM`, `CADSS` cũng như các thành phần đã làm/chỉnh sửa như `HumanizedGestureBuilder.kt`, `VisualDriftDetector.kt`, `CentralAgentLoop.kt`, `ActionExecutor.kt`)[cite: 1].
 
-### Mốc 2: Nhận thức cảnh (Scene Detector), Điều hướng & Gia cố tầng Thao tác Android
-- Xây dựng **Scene Detector & Navigation Engine** để kỹ năng không bị "mù cảnh" hay chỉ chạy cứng từ màn hình chính:
-  - Nhận diện cảnh hiện tại (ví dụ: Làng chính, Làng đêm, Đô thành, màn hình chiến đấu/tìm trận, màn hình cài đặt/nâng cấp, hoặc pop-up/thông báo che màn hình).
-  - Tự đóng/xử lý pop-up chắn đường và tự điều hướng tới đúng cảnh trước khi thực thi kỹ năng (ví dụ: đang ở Làng chính nhưng cần làm việc ở Làng đêm thì tự chuyển cảnh trước).
-  - Cho phép kỹ năng có điều kiện tiên quyết, phản ứng theo ngữ cảnh và phối hợp xin quyết định từ bộ não trung tâm khi gặp rẽ nhánh.
-- Nâng cấp **tầng thực thi thao tác trên Android**:
-  - Bù trừ `WindowInsets` / `DisplayCutout` và tỷ lệ màn hình khi quy đổi tọa độ.
-  - Thêm **Human-like touch**: nhiễu tọa độ ngẫu nhiên quanh điểm chạm, đường vuốt cong Bézier có gia tốc tự nhiên, độ trễ và nhịp nghỉ tự nhiên để giảm dấu hiệu thao tác máy móc.
-  - Duy trì dịch vụ ổn định (Foreground Service khi chạy tự động) trên nền tảng `AccessibilityService`, đồng thời thiết kế adapter/hỗ trợ `Shizuku` nếu khả dụng trên thiết bị.
-
-### Mốc 3: Central Agent tự điều phối, Thị giác 2 tầng & Deep Skill Research
-- Xây dựng **Central Agent Orchestrator** nhận yêu cầu từ người dùng trên app, phân rã mục tiêu thành các bước thực thi, phối hợp Scene/Navigation + Skill + verify kết quả sau mỗi hành động.
-- Áp dụng **Kiến trúc Thị giác 2 tầng**:
-  - **Tầng cục bộ (On-Device Vision):** Dùng OCR (ML Kit), OpenCV / Template Matching / phân tích vùng ROI (như các góc hiển thị tài nguyên/nút điều khiển) để nhận diện cảnh, đọc số liệu và tìm nút cố định nhanh, ít tốn token.
-  - **Tầng suy luận AI (Gemini):** Chỉ gọi khi cần ra quyết định chiến lược, xử lý tình huống phức tạp, phân tích yêu cầu sâu hoặc chạy **Deep Research**.
-- Xây dựng **Deep Skill Research (Chế độ tự nghiên cứu khi không biết làm)**:
-  - Khi người dùng yêu cầu tác vụ mà chưa có kỹ năng tương ứng hoặc gặp giao diện/màn hình mới lạ: phân tích mục tiêu → quan sát màn hình → xác định các điểm/vùng tương tác khả nghi → thử nghiệm có kiểm soát (tôn trọng nghiêm ngặt ranh giới an toàn) → kiểm tra màn hình sau thao tác để xác nhận kết quả → lưu thành kỹ năng/playbook CASL tái sử dụng cho các lần sau.
-
-### Mốc 4: Điều khiển trực tiếp trên game (Floating HUD) & Vận hành thông minh (Smart Sleep)
-- **Floating Emergency Stop & Thought Stream:** Thêm bong bóng điều khiển nổi trên màn hình game cho phép **dừng khẩn cấp (STOP/PAUSE) 1 chạm** và xem ngắn gọn luồng suy nghĩ/hành động hiện tại của Agent.
-- **Smart Sleep & Schedule:** Tận dụng timer công trình/thợ xây/quân lính trong DB và `WorkManager` để nghỉ/hẹn giờ chạy lại hợp lý thay vì chạy rỗng liên tục gây nóng máy/hao pin.
+### 1.2. Các bài học kỹ thuật & giới hạn nền tảng bắt buộc phải ghi nhớ
+1. **Clash of Clans chạy trên OpenGL / Vulkan (`SurfaceView`):**
+   * Toàn bộ giao diện game là canvas đồ họa vẽ động (hiệu ứng xoay, mây bay, quân lính di chuyển, đồ họa 3D), **không có cây UI XML của game**[cite: 1].
+   * Do đó `uiautomator dump` **không đọc được** các nút hay chữ bên trong canvas của CoC[cite: 1]. Tuy nhiên `uiautomator` **rất hữu ích cho vòng ngoài game** (pop-up hệ thống Android như cảnh báo pin yếu, cập nhật Google Play, ứng dụng không phản hồi, hoặc tự động hóa/kiểm tra trong màn hình Cài đặt Android)[cite: 1].
+2. **Khác biệt giữa AVD Android Studio và LDPlayer 9 cho Clash of Clans:**
+   * Máy ảo mặc định của Android Studio (ví dụ `Pixel_6` trên `emulator-5554`, kiến trúc `x86_64`) từng gặp 2 vấn đề: (a) cấu hình ABI ban đầu thiếu `x86_64`/`x86` khiến APK không cài được lên máy ảo x86_64, và (b) khi mở CoC bị crash (`Clash of Clans keeps stopping`, lỗi `nativeLoad libsupercell_clashofclans.so`) do cơ chế Anti-Cheat / Play Integrity Protection của Supercell chặn ảnh AVD mặc định[cite: 1].
+   * **LDPlayer 9** (`C:\LDPlayer\LDPlayer9`, ADB `127.0.0.1:5555`) là môi trường chạy CoC thực tế trên máy tính (đã xác nhận chạy được CoC, nhận diện cảnh `HOME_VILLAGE`, TH3, chỉ số tài nguyên và trạng thái thợ xây)[cite: 1]. Đồng thời, cần giữ cấu hình ABI tương thích trong `build.gradle.kts` để tránh lỗi cài đặt trên thiết bị/giả lập x86_64 hoặc ARM[cite: 1].
+   * Trên **LDPlayer**, `AccessibilityService` đôi khi cần xác nhận trong UI Settings của hệ thống/giả lập để thực sự bind[cite: 1].
+3. **Màn hình ngang (`Landscape`), Insets, Notch và độ phân giải:**
+   * CoC chạy ngang (`Landscape`)[cite: 1]. Mỗi thiết bị hoặc giả lập có tỷ lệ màn hình, vùng tai thỏ/đục lỗ (`DisplayCutout`), thanh điều hướng/cử chỉ (`WindowInsets`) khác nhau[cite: 1]. Mọi phép quy đổi tọa độ từ hệ chuẩn hóa `0..1000` (`HVCS`) sang tọa độ pixel thực tế phải tính đến kích thước vùng hiển thị khả dụng và `WindowInsets` / `DisplayCutout` để không bị lệch điểm chạm[cite: 1].
+4. **ADB trên máy tính khi debug vs Ứng dụng chạy độc lập trên thiết bị:**
+   * Khi kết nối qua `adb` từ máy tính, có thể cài APK (`adb install -r`), mở ứng dụng/game, chụp màn hình (`adb exec-out screencap -p`), đọc log (`adb logcat`) và kiểm chứng trực tiếp[cite: 1].
+   * Khi ứng dụng chạy độc lập trên thiết bị không cắm cáp, ứng dụng dựa vào `AccessibilityService` (kèm `Foreground Service` để giữ dịch vụ ổn định trước cơ chế kill ngầm của các ROM tùy biến như ColorOS, MIUI/HyperOS, OneUI) và có thể tích hợp/hỗ trợ `Shizuku` để thao tác cấp hệ thống mượt mà, ít bị nuốt thao tác khi khả dụng[cite: 1].
 
 ---
 
-## 3. RANH GIỚI AN TOÀN TUYỆT ĐỐI (GAME SAFETY GUARDRAIL)
-- Trong mọi chế độ chạy tự động hoặc **Deep Research**, **cấm tuyệt đối** thao tác chạm vào các vùng/nút liên quan đến: tiêu Gem xanh, mua hàng/gói nạp tiền thật, rời Clan, xóa dữ liệu/tài khoản, hoặc thay đổi cài đặt nguy hiểm ngoài ý muốn.
-- Giới hạn số bước thử nghiệm tối đa trong một phiên Deep Research (ví dụ tối đa 6–8 bước/lần thử) và luôn có điều kiện dừng an toàn nếu màn hình không đổi hoặc lặp lỗi.
+## 2. Dọn dẹp tính năng thừa & Tái cấu trúc giao diện (UI/UX) chuẩn logic
+
+### 2.1. Các phần bắt buộc loại bỏ hoàn toàn
+* **Xóa ghi chú cá nhân** bên trong tab AI[cite: 1].
+* **Xóa toàn bộ tab Quy trình** (Workflow Studio / quy tắc CASL IF-ELSE cũ)[cite: 1].
+* **Xóa toàn bộ tab Lịch** (lập lịch tác vụ cũ)[cite: 1].
+* Loại bỏ tư duy cũ coi mỗi Skill chỉ là một script tĩnh bắt đầu từ sảnh chính hoặc tách rời bối cảnh[cite: 1].
+
+### 2.2. Thiết kế lại UI/UX theo nguyên tắc logic & rõ ràng
+* Sắp xếp lại giao diện bằng Jetpack Compose + Material 3 sao cho phân cấp thông tin rõ ràng, gọn gàng, không nhồi nhét, không vi phạm nguyên tắc UI/UX cơ bản[cite: 1].
+* Tổ chức thành các khu vực/tab chức năng cốt lõi, mạch lạc:
+  1. **Tab / Màn hình Agent (Điều khiển, Mục tiêu & Theo dõi):**
+     * Ô nhập yêu cầu / mục tiêu bằng ngôn ngữ tự nhiên cho Agent (ví dụ: thu hoạch tài nguyên, dọn chướng ngại vật ở cả Làng chính lẫn Làng đêm, nâng cấp, farm tài nguyên theo điều kiện lọc, v.v.)[cite: 1].
+     * Nút điều khiển **Chạy / Tạm dừng / Dừng khẩn cấp**[cite: 1].
+     * Công tắc bật/tắt **Bong bóng nổi (Floating HUD)** ngay trên màn hình[cite: 1].
+     * Khung hiển thị trực quan trạng thái vận hành: cảnh hiện tại (`Scene`), bước/sub-task đang xử lý, **luồng suy nghĩ (`Thought Stream`)** ngắn gọn giải thích Agent đang làm gì/tại sao làm vậy, và kết quả/nhật ký gần nhất[cite: 1].
+  2. **Tab / Màn hình Kỹ năng (Skills & Deep Research):**
+     * Hiển thị danh sách kỹ năng (kỹ năng có sẵn / kỹ năng đã được nghiên cứu và đúc kết từ **Deep Research** / kỹ năng đã tự sửa chữa qua **Self-Healing**), kèm cảnh áp dụng, trạng thái vòng đời/xác minh, phiên bản và lịch sử chạy[cite: 1].
+     * Cho phép kiểm tra/kích hoạt kỹ năng hoặc yêu cầu Agent nghiên cứu/tự học cách làm cho một tác vụ mới[cite: 1].
+  3. **Tab / Màn hình Cài đặt & Trạng thái hệ thống:**
+     * Hiển thị **trạng thái thực tế của `AccessibilityService`** (đồng bộ vòng đời dịch vụ + trạng thái bật trong hệ thống Android, khắc phục triệt để tình trạng báo *"dịch vụ không hoạt động"* khi đã bật hoặc sai lệch trạng thái), kèm nút mở nhanh màn hình Cài đặt Trợ năng[cite: 1].
+     * Hiển thị & cấp quyền **Bong bóng nổi (`SYSTEM_ALERT_WINDOW`)** và thông tin/trạng thái hỗ trợ `Shizuku` / `Foreground Service`[cite: 1].
+     * Cấu hình Gemini API Key & mô hình/nhà cung cấp AI, chỉnh sửa/xác nhận nguyên tắc hệ thống (`System Context`), ranh giới an toàn và quản lý dữ liệu/sao lưu-khôi phục[cite: 1].
 
 ---
 
-## 4. QUY TẮC KIỂM THỬ & CHỐNG KẸT VÒNG LẶP KHI TỰ DEBUG
-1. **Kiểm thử theo môi trường có sẵn:**
-   - Nếu có thiết bị/giả lập đang kết nối qua `adb devices`: build APK (`./gradlew assembleDebug`), cài đặt (`adb install -r`), mở ứng dụng, chụp màn hình (`adb exec-out screencap -p`) và đọc `adb logcat` để kiểm chứng trực tiếp.
-   - Nếu **không** có thiết bị kết nối: không dừng lại chờ thiết bị; hãy viết và chạy **Unit Test / Instrumentation-free test** (`./gradlew testDebugUnitTest`) để kiểm chứng logic phân tầng ngữ cảnh, Room DB, Scene Detector, Central Agent và sinh kịch bản CASL từ Deep Research.
-2. **Luật chống kẹt vòng lặp (3-Strike Rule):** Nếu cùng một lỗi biên dịch hoặc test xảy ra **3 lần liên tiếp** chưa khắc phục được, hãy dừng sửa mù quáng, ghi nhận nguyên nhân gốc rễ, chuyển sang phương án đơn giản/an toàn hơn rồi tiếp tục.
-3. **Báo cáo tiến độ sau mỗi mốc/đợt sửa:** Luôn tóm tắt ngắn gọn: *(a) Đã làm/sửa gì*, *(b) Đã build/test/verify thế nào*, *(c) Còn điểm nào cần kiểm tra trên máy thật hoặc bước tiếp theo là gì*.
+## 3. Cơ chế lưu trữ thông tin, truy xuất & ngữ cảnh phân tầng (Context & Memory Engine)
+
+Đây là phần bắt buộc phải thiết kế rõ cả về **lưu trữ vật lý**, **4 tầng ngữ cảnh**, **ngữ cảnh cục bộ (Local Context)** và **quy tắc đọc/ghi/cập nhật/dọn dẹp**.
+
+### 3.1. Mô hình lưu trữ vật lý 2 tầng
+1. **Room Database (SQLite)** — thay thế việc nhồi toàn bộ trạng thái, layout, lịch sử và ảnh vào chuỗi JSON trên `SharedPreferences` (chỉ dùng `SharedPreferences` / DataStore cho các cấu hình nhẹ/cờ bật tắt đơn giản)[cite: 1]:
+   * Lưu các thực thể có cấu trúc rõ ràng:
+     * **Định hướng & nguyên tắc hệ thống (`system_directives`):** quy tắc cốt lõi, giới hạn an toàn, chiến lược vận hành[cite: 1].
+     * **Phiên chạy & bước thực thi (`agent_sessions`, `session_steps`):** mục tiêu người dùng giao, danh sách sub-task, bước hiện tại, trạng thái từng bước, lý do ra quyết định, nhật ký suy nghĩ[cite: 1].
+     * **Trạng thái thế giới / căn cứ & lịch trình (`world_village_state`, `world_layout_anchors`, `schedules`):** thông tin theo từng cảnh (`HOME_VILLAGE`, `BUILDER_BASE`, `CLAN_CAPITAL`, v.v.), cấp Nhà chính, tài nguyên hiện có, dữ liệu/layout căn cứ & điểm neo, trạng thái nâng cấp / công trình / thợ xây / quân lính & mốc thời gian còn lại, lịch hẹn chạy (`Smart Sleep` / `WorkManager`), thông tin hồ sơ/tài khoản nếu có chuyển đổi Supercell ID[cite: 1].
+     * **Kho kỹ năng & phiên bản bất biến (`learned_skills`, `skill_versions`):** kịch bản `CASL`, điểm neo/tọa độ `HVCS`, điều kiện tiên quyết, điều kiện kiểm chứng sau thực thi, trạng thái vòng đời/xác minh, lịch sử phiên bản bất biến (khi cập nhật/tự sửa sinh phiên bản mới thay vì ghi đè mù quáng), thống kê thành công/thất bại & số lần tự sửa[cite: 1].
+     * **Nhật ký thực thi & nghiên cứu (`execution_logs`, `research_records`):** lưu bằng chứng thao tác, kết quả kiểm chứng, lý do dừng/lỗi để phục vụ debug và học rút kinh nghiệm[cite: 1].
+2. **Bộ nhớ file nội bộ ứng dụng (`filesDir`)** — lưu các dữ liệu phi cấu trúc/kích thước lớn[cite: 1]:
+   * Lưu ảnh crop icon/template, ảnh mẫu nhận diện, ảnh chụp đối chứng khi nghiên cứu/tự sửa kỹ năng, hoặc gói xuất/nhập sao lưu (kế thừa khả năng sao lưu/khôi phục dữ liệu kèm ảnh cắt của `CADSS`)[cite: 1].
+   * Trong Room DB chỉ lưu đường dẫn file (`filePath`), metadata và mã băm/chữ ký kiểm chứng (như SHA-256 khi cần xác minh tính toàn vẹn), **không nhét raw bitmap/base64 khổng lồ vào SQLite hay `SharedPreferences`**[cite: 1].
+
+### 3.2. Hệ thống ngữ cảnh phân tầng 4 tầng & Ngữ cảnh cục bộ
+Ngữ cảnh phải được phân tầng rõ ràng để mỗi thành phần nhận đúng thông tin cần thiết mà không bị loãng nhiễu hoặc phình token:
+
+1. **Tầng 1 — System / Global Context (Bối cảnh hệ thống & nguyên tắc tối cao):**
+   * Chứa nguyên tắc cốt lõi của Agent, chiến lược vận hành, quy tắc kiểm chứng trước khi kết luận thành công và **ranh giới an toàn tuyệt đối**[cite: 1].
+   * *Cách truy cập:* Đọc khi bắt đầu phiên hoặc khi người dùng cập nhật nguyên tắc; tiêm vào đầu các lượt suy luận/lập kế hoạch/nghiên cứu của Agent[cite: 1].
+2. **Tầng 2 — Session / Agent Context (Bối cảnh phiên & điều phối mục tiêu):**
+   * Chứa mục tiêu người dùng giao, danh sách sub-task đã phân rã, chỉ số bước hiện tại, cảnh hiện tại, trạng thái (`IDLE`, `RUNNING`, `PAUSED`, `RESEARCHING`, `HEALING`, `STOPPED`), kết quả các bước vừa qua và luồng suy nghĩ (`Thought Stream`)[cite: 1].
+   * *Cách truy cập & quản lý độ dài:* Đọc-ghi liên tục theo từng vòng lặp của Central Agent[cite: 1]. Các bước cũ đã hoàn tất từ lâu được nén/tóm tắt thành bản tóm tắt gọn trong DB, chỉ giữ chi tiết đầy đủ cho **bước hiện tại** và **N bước gần nhất** để tránh phình ngữ cảnh khi chạy lâu[cite: 1].
+3. **Tầng 3 — World State & Schedule Context (Bối cảnh môi trường game & lịch trình):**
+   * Chứa dữ liệu thực tế về làng/căn cứ (cấp Nhà chính, tài nguyên, layout/điểm neo theo cảnh, trạng thái/thời gian nâng cấp, thợ xây, quân lính, thời gian bảo trì/ngủ tiếp theo)[cite: 1].
+   * *Cách truy cập & độ tươi (TTL):* Truy vấn theo khóa cảnh (`sceneId`) và kiểm tra độ tươi dữ liệu (`timestamp` / `TTL`)[cite: 1]. Nếu dữ liệu vừa đọc và chưa có thao tác làm đổi màn hình thì có thể tái sử dụng nhanh; nếu dữ liệu đã cũ hoặc vừa có hành động làm biến đổi trạng thái (như bấm nâng cấp, thu hoạch, tìm trận) thì phải đọc lại qua Vision/OCR để đối chiếu[cite: 1].
+4. **Tầng 4 — Skill / Research Local Context (Ngữ cảnh cục bộ của từng Skill & từng phiên Deep Research):**
+   * Là **ngữ cảnh cục bộ** cấp phát riêng cho một lần thực thi `Skill` hoặc một phiên `Deep Research` / `Self-Healing`[cite: 1].
+   * Chứa biến tạm của kịch bản, kết quả OCR/OpenCV/ROI của khung hình hiện tại, tọa độ mục tiêu đang xử lý, bộ đếm số lần thử lại của riêng kỹ năng/phiên đó, danh sách vị trí/điểm đã thăm dò trong phiên nghiên cứu hiện tại và trạng thái nhánh rẽ cục bộ[cite: 1].
+   * *Vòng đời & cô lập:* Được tạo mới khi bắt đầu chạy Skill hoặc phiên Deep Research, chỉ dùng trong phạm vi tác vụ cục bộ đó (kết hợp đọc thêm `World State` / `Session Context` khi cần xin quyết định hoặc kiểm chứng), **tự giải phóng/xóa biến tạm khi kết thúc** để không rò rỉ trạng thái bẩn sang lần chạy sau[cite: 1]. Chỉ các kết quả đã kiểm chứng hoặc kỹ năng/điểm neo đã xác nhận mới được ghi ngược lên Room DB[cite: 1].
+
+### 3.3. Quy tắc đọc, ghi, chống ghi đè sai và dọn dẹp dữ liệu
+* **Đọc trước khi hành động — Kiểm chứng sau khi hành động:** Mọi quyết định đều đọc ngữ cảnh hiện tại; sau khi chạm/vuốt/điều hướng, phải quan sát lại màn hình để kiểm chứng kết quả rồi mới cập nhật `World State` và `Session Context`[cite: 1].
+* **Kiểm chứng thực tế (Post-condition):** Không tin rằng bấm nút là đã thành công nếu thiếu bằng chứng/thay đổi tương ứng trên màn hình (ví dụ: nâng cấp công trình cần kiểm tra tài nguyên giảm / trạng thái nâng cấp / thợ xây bận; thu hoạch cần kiểm tra dấu hiệu/tài nguyên/trạng thái thay đổi)[cite: 1].
+* **Chống ghi đè sai:** Kết quả từ OCR mờ, ước lượng tạm thời hoặc thăm dò thử nghiệm chưa xác minh không được ghi đè thẳng lên tri thức đã xác minh (`VERIFIED`)[cite: 1].
+* **Dọn dẹp & bảo toàn bộ nhớ:** Tự động thu gọn log cũ vượt ngưỡng, xóa ảnh thử nghiệm nháp không còn cần thiết để tránh phình dung lượng[cite: 1].
+
+---
+
+## 4. Kiến trúc điều phối trung tâm, nhận diện cảnh, điều hướng & thị giác 2 tầng
+
+### 4.1. Central Agent Loop (`Observe → Route → Act / Research → Verify`)
+Agent điều phối toàn bộ quá trình từ lúc nhận mục tiêu đến khi hoàn thành hoặc dừng an toàn[cite: 1]:
+1. **Tiếp nhận & phân rã mục tiêu:** Nhận yêu cầu từ người dùng (trên app hoặc qua bong bóng nổi), kết hợp `System Context` + `World State` + danh mục `Skill` để phân rã thành chuỗi sub-task có thứ tự và điều kiện đạt[cite: 1].
+2. **Observe (Quan sát):** Kiểm tra cờ dừng/tạm dừng; chụp màn hình; chuẩn hóa vùng hiển thị (`Landscape`, `WindowInsets`, `DisplayCutout`); chạy **Tầng Vision cục bộ** trước[cite: 1].
+3. **Route (Nhận diện cảnh & điều hướng):**
+   * Xác định cảnh hiện tại (`SceneDetector`): ví dụ Làng chính (`HOME_VILLAGE`), Làng đêm (`BUILDER_BASE`), Đô thành (`CLAN_CAPITAL`), màn hình chiến đấu/tìm trận (`ATTACK_PREVIEW` / `BATTLE`), màn hình nâng cấp/huấn luyện/cài đặt, pop-up/thông báo che màn hình (`POPUP_BLOCKING`), hoặc cảnh lạ/không xác định (`UNKNOWN`)[cite: 1].
+   * Nếu đang có **pop-up che màn hình** → ưu tiên xử lý/đóng pop-up trước[cite: 1].
+   * Nếu đang ở **sai cảnh** so với yêu cầu của bước hiện tại (ví dụ: đang ở Làng chính nhưng bước hiện tại yêu cầu thao tác ở Làng đêm) → gọi **Navigation Engine** tự chuyển cảnh (không giả định mọi thứ bắt đầu từ màn hình chính)[cite: 1].
+4. **Act hoặc Deep Research (Thực thi hoặc tự nghiên cứu):**
+   * Nếu có `Skill` phù hợp và thỏa điều kiện tiên quyết → chạy `Skill` qua `Skill Local Context` và tầng điều khiển Android[cite: 1]. Nếu gặp nhánh rẽ hoặc tình huống bất thường, `Skill` có thể phối hợp xin quyết định từ bộ não trung tâm[cite: 1].
+   * Nếu **chưa có `Skill`** hoặc **gặp màn hình/thao tác chưa biết cách làm** → chuyển sang **Deep Skill Research**[cite: 1].
+5. **Verify & Commit (Xác minh & ghi nhớ):** Quan sát lại màn hình sau hành động để đối chiếu kết quả kỳ vọng; cập nhật `Skill Local Context`, ghi nhận vào `Session Context` & `World State` (Room DB), cập nhật `Thought Stream`[cite: 1].
+
+### 4.2. Kiến trúc Thị giác 2 tầng (2-Tier Vision) — Giảm tải AI & tăng tốc độ/độ chính xác
+* **Tầng 1 — Thị giác cục bộ (On-Device Vision — chạy trước, 0 token, phản hồi nhanh):**
+  * Dùng **ML Kit OCR**, **OpenCV** (Template Matching, phân tích màu RGB/HSV, độ sáng, mật độ cạnh, pHash) và **vùng quan tâm (ROI)** (tận dụng các vùng giao diện đặc trưng của CoC như 4 góc màn hình hiển thị thông tin, tài nguyên, nút tấn công, cửa hàng/cài đặt)[cite: 1].
+  * Đảm nhận: nhận diện cảnh (`SceneDetector`), phát hiện pop-up che màn hình, đọc số liệu/tài nguyên/thời gian, dò vị trí nút cố định/template, phát hiện chấm đỏ/sự kiện mới (màu HSV), nhận diện ranh giới vùng thả quân (`Drop Zone` viền đỏ) và hỗ trợ lọc chỉ số trận đánh (`Loot Filter`) khi làm tác vụ farm/tấn công[cite: 1].
+* **Tầng 2 — Suy luận AI (Gemini — chỉ gọi khi thực sự cần):**
+  * Chỉ gọi khi cần phân rã yêu cầu phức tạp, ra quyết định chiến lược có nhiều nhánh rẽ, xử lý tình huống bất thường mà tầng cục bộ không đủ kết luận, tư vấn nâng cấp/meta hoặc phân tích căn cứ, hoặc chạy **Deep Research** / **Self-Healing**[cite: 1].
+
+---
+
+## 5. Kỹ năng linh hoạt 3 lớp hợp đồng, nhận diện biến động & tự chữa lành (Self-Healing)
+
+### 5.1. Kỹ năng linh hoạt (Adaptive Micro-Skills) & kế thừa CASL / HVCS
+* Tái sử dụng và nâng cấp **CASL** (JSON AST DSL với các phép toán `set`, `output`, `call`, `skill`, `if`/`then`/`else`, `repeat`, `wait`, `assert`, `log`, `return` và allow-list API) cùng **HVCS** (tọa độ chuẩn hóa `0..1000`, lưới ô/bounding box/thuộc tính thị giác)[cite: 1].
+* Ưu tiên **chờ phản hồi thị giác (`Wait-Until`)** theo điều kiện xuất hiện/biến đổi trên màn hình thay vì ngủ cứng `wait(...)` cố định dễ lệch nhịp khi lag[cite: 1].
+* Mỗi `Skill` thiết kế theo **3 lớp hợp đồng**:
+  1. **Pre-condition (Điều kiện tiên quyết):** Phải đúng cảnh (`Scene`) và không bị pop-up che khuất mới được chạy[cite: 1].
+  2. **Execution (Thực thi nhiều nấc):** Thử nấc nhanh/cache hoặc tọa độ neo đã lưu → nếu không phản hồi thì dùng OpenCV/OCR/template tìm lại → nếu vẫn bế tắc hoặc gặp nhánh rẽ thì hỏi bộ não trung tâm hoặc kích hoạt tự sửa/nghiên cứu[cite: 1].
+  3. **Post-condition (Kiểm chứng kết quả):** Đối chiếu bằng chứng sau thao tác (ví dụ tài nguyên thay đổi, trạng thái công trình/thợ xây thay đổi, giao diện chuyển sang trạng thái mong đợi) mới tính là thành công[cite: 1].
+
+### 5.2. Cảm biến nhận diện sự kiện, cập nhật & độ lệch giao diện (Event & Drift Detector)
+* **Nhận diện bảo trì / cập nhật game:** Quét từ khóa bảo trì/cập nhật qua OCR hoặc kiểm tra thay đổi phiên bản; khi gặp bảo trì/cập nhật, có thể đọc thời gian chờ (nếu có) và kích hoạt chế độ nghỉ/hẹn giờ chạy lại phù hợp[cite: 1].
+* **Nhận diện độ lệch giao diện (`VisualDriftDetector`):** Khi độ khớp template/mẫu giảm bất thường (ví dụ game đổi giao diện theo mùa như tuyết/Halloween/Tết hoặc dời vị trí nút/icon sau bản cập nhật), ghi nhận độ tin cậy giảm để kích hoạt hiệu chỉnh/tự sửa thay vì bấm mù[cite: 1].
+* **Nhận diện sự kiện / thông báo mới:** Phát hiện chấm đỏ/biểu tượng sự kiện mới (như chấm đỏ qua phân tích màu HSV hoặc biểu tượng/banner sự kiện mới) để báo cho Agent biết có sự kiện/mục mới cần xử lý nếu mục tiêu liên quan[cite: 1].
+
+### 5.3. Quy trình tự chữa lành & tự xây lại Skill (Self-Healing & Auto-Rebuild)
+* Khi một `Skill` thất bại lặp lại (ví dụ lỗi 2 lần liên tiếp hoặc không đạt `Post-condition` do game cập nhật/đổi giao diện) hoặc khi phát hiện sự kiện/giao diện mới cần thích ứng:
+  1. **Đóng băng an toàn:** Tạm dừng thao tác bừa bãi của kỹ năng đang lỗi[cite: 1].
+  2. **Phân tích & đối chiếu:** Gọi AI phân tích sự khác biệt giữa trạng thái/ảnh kỳ vọng trước đó và màn hình hiện tại (hoặc kết hợp tra cứu tri thức khi cần)[cite: 1].
+  3. **Tái tạo & phiên bản hóa bất biến:** Cập nhật điểm neo/mẫu/ROI và sinh **phiên bản Skill mới** (`version + 1`) trong `CASL` / Room DB, giữ lại phiên bản cũ để có thể rollback an toàn[cite: 1].
+  4. **Kiểm thử xác minh & giới hạn tự sửa:** Chạy thử kiểm chứng; áp dụng **giới hạn tối đa 3 lần tự sửa** cho cùng một vấn đề—nếu sau 3 lần vẫn chưa xác minh thành công thì dừng tự sửa, ghi log rõ ràng và thông báo cho người dùng[cite: 1].
+
+---
+
+## 6. Grounded Deep Research (Nghiên cứu chuyên sâu kết nối tri thức khi chưa biết làm)
+
+Khi người dùng giao một yêu cầu hoặc Agent gặp một màn hình/tính năng/sự kiện mà hệ thống **chưa có cách làm**:
+1. **Trích xuất thông tin tại chỗ:** Dùng OCR / Vision cục bộ đọc tên sự kiện, tiêu đề màn hình, từ khóa hoặc thông số hiển thị trên màn hình[cite: 1].
+2. **Nghiên cứu kết nối tri thức bên ngoài (Grounded Web Search):** Không nhốt AI trong phòng kín chỉ nhìn ảnh mò mẫm; sử dụng Gemini kết hợp tìm kiếm Web / nguồn tri thức cộng đồng & chính thống về Clash of Clans (như CoC Wiki, Reddit, Clash Ninja, thông tin từ Supercell...) để nắm rõ luật chơi, vị trí chức năng, cách mở/nhận thưởng hoặc mẹo/chiến thuật phù hợp[cite: 1].
+3. **Đối chiếu với màn hình thực tế:** Kết hợp tri thức vừa tra cứu được với ảnh chụp & dữ liệu Vision của màn hình hiện tại để xác định chính xác vùng/nút cần tương tác (thay vì thử mò hàng chục lần)[cite: 1].
+4. **Thử nghiệm & thực thi có kiểm soát:** Thực hiện từng bước thăm dò/thao tác có giới hạn số bước tối đa trong một phiên nghiên cứu (ví dụ tối đa 6–8 bước), luôn tôn trọng **Ranh giới an toàn tuyệt đối** và dừng an toàn nếu màn hình không đổi hoặc gặp bẫy/lỗi[cite: 1].
+5. **Kiểm chứng & đóng gói Skill:** Xác minh kết quả đạt được trên màn hình, sau đó lưu quy trình, điều kiện, điểm neo/ảnh mẫu vào kho `Skill` (Room DB) để các lần sau tái sử dụng trực tiếp[cite: 1].
+
+---
+
+## 7. Tầng thao tác Android, sửa lỗi AccessibilityService, chạy ngầm, Bong bóng nổi & Smart Sleep
+
+### 7.1. Sửa dứt điểm lỗi `AccessibilityService` bị báo "dịch vụ không hoạt động"
+* Rà soát và chuẩn hóa khai báo dịch vụ trong `AndroidManifest.xml` (`android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"`, `android:exported="true"` theo chuẩn SDK, `intent-filter` `android.accessibilityservice.AccessibilityService`, `meta-data` trỏ tới file cấu hình XML hợp lệ trong `res/xml/`)[cite: 1].
+* Đồng bộ chặt chẽ trạng thái giữa **vòng đời dịch vụ thực tế** (`onServiceConnected`, `onInterrupt`, `onDestroy`, instance/Flow trạng thái) và **trạng thái bật thực tế trong hệ thống Android** (`Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES` / `AccessibilityManager`), để khi người dùng bật trong Cài đặt Trợ năng (kể cả trên LDPlayer cần xác nhận trong UI Settings), ứng dụng cập nhật đúng trạng thái **Đang hoạt động** và không bị kẹt trạng thái chết[cite: 1].
+* Cung cấp nút mở thẳng màn hình Cài đặt Trợ năng ngay trên ứng dụng[cite: 1].
+
+### 7.2. Quy đổi tọa độ, thao tác tự nhiên chống dấu hiệu máy móc & hỗ trợ Shizuku
+* Quy đổi tọa độ chuẩn hóa `0..1000` (`HVCS`) theo kích thước thực tế, hướng xoay ngang (`Landscape`), `WindowInsets` và `DisplayCutout` của thiết bị/giả lập[cite: 1].
+* Tích hợp & sử dụng thao tác tự nhiên (`HumanizedGestureBuilder` / tương đương): **nhiễu tọa độ Gaussian** (khoảng `±5–7px` quanh điểm chạm), **đường vuốt cong Bézier** có gia tốc tự nhiên thay vì đường thẳng tắp, **thời gian chạm linh hoạt** (khoảng `80–160ms`), cùng **độ trễ / nhịp nghỉ tự nhiên** để giảm rủi ro bị phát hiện hành vi bot tĩnh[cite: 1].
+* Duy trì `AccessibilityService` làm trụ cột thao tác trên thiết bị, đồng thời xây dựng adapter/hỗ trợ **`Shizuku`** (khi thiết bị có cài & cấp quyền Shizuku) để thực thi mượt mà, ổn định hơn trên các máy hỗ trợ[cite: 1].
+
+### 7.3. Chạy ngầm (`Foreground Service`), Bong bóng nổi (`Floating HUD`) & `Smart Sleep`
+* **Foreground Service:** Chạy dịch vụ nền kèm thông báo trạng thái rõ ràng khi bật chế độ tự động hoặc bong bóng nổi nhằm hạn chế bị Android hoặc ROM tùy biến (ColorOS, MIUI/HyperOS, OneUI) ngắt tiến trình[cite: 1].
+* **Bong bóng nổi (Floating Bubble / HUD):** Xin quyền `SYSTEM_ALERT_WINDOW` (`Settings.canDrawOverlays`); hiển thị icon nổi khi bật để người dùng chạm mở/thu gọn bảng điều khiển nhanh ngay trên game, **dừng/tạm dừng/chạy tức thì**, xem cảnh hiện tại & dòng suy nghĩ (`Thought Stream`) của Agent, hoặc chuyển chế độ (chỉ quan sát vs tự động)[cite: 1].
+* **Smart Sleep & Quản lý tài nguyên:** Tận dụng thông tin thời gian chờ (thợ xây, nâng cấp, quân lính, bảo trì) lưu trong Room DB và `WorkManager` để nghỉ / hẹn giờ chạy lại hợp lý (kết hợp tắt/thoát game khi chờ lâu nếu phù hợp luồng) nhằm tránh để game 3D chạy rỗng gây nóng máy, tụt hiệu năng và hao pin[cite: 1]. Cũng hỗ trợ luồng chuyển đổi tài khoản qua **Supercell ID** khi có nhu cầu đa tài khoản[cite: 1].
+
+---
+
+## 8. Ranh giới an toàn tuyệt đối (Safety Guardrails)
+
+Trong mọi chế độ chạy tự động, `Deep Research` hoặc `Self-Healing`, hệ thống **bắt buộc** tuân thủ các ranh giới an toàn sau:
+1. **Cấm tuyệt đối tiêu Gem xanh** ngoài ý muốn (không bấm các nút xác nhận/mua/tăng tốc/hoàn tất bằng Gem nếu chưa được cho phép rõ ràng)[cite: 1].
+2. **Cấm tuyệt đối mua hàng / nạp tiền thật** (gói nạp tiền, ưu đãi trả phí trong cửa hàng/sự kiện)[cite: 1].
+3. **Cấm tuyệt đối các thao tác phá hủy/nhạy cảm:** rời Clan, xóa tài khoản, xóa dữ liệu quan trọng hoặc thay đổi cài đặt hệ thống/game gây mất mát ngoài ý muốn[cite: 1].
+4. **Giới hạn bước thăm dò & chống vòng lặp:** Mọi phiên thăm dò/nghiên cứu phải có giới hạn số bước tối đa (ví dụ tối đa 6–8 bước/phiên nghiên cứu) và dừng an toàn nếu vượt ngưỡng hoặc không có tiến triển[cite: 1].
+
+---
+
+## 9. Quy trình kiểm thử, debug & tiêu chí hoàn tất (Definition of Done)
+
+### 9.1. Quy trình chạy build & test bắt buộc
+* Dùng Java 21 tại `C:\linhtinh\adroid\jbr` và Android SDK tại `C:\Users\ADMIN\AppData\Local\Android\Sdk` cùng Gradle 8.9[cite: 1].
+* Sau mỗi đợt thay đổi code, chạy biên dịch và unit test:
+  * `./gradlew assembleDebug`
+  * `./gradlew testDebugUnitTest`
+* Viết unit test bao phủ các logic cốt lõi: lưu trữ & truy xuất Room DB, phân tầng ngữ cảnh & ngữ cảnh cục bộ, `SceneDetector` / điều hướng, `2-Tier Vision` / `VisualDriftDetector`, `HumanizedGestureBuilder` / quy đổi tọa độ, luồng `Central Agent` và `Deep Research` / `Self-Healing`[cite: 1].
+
+### 9.2. Kiểm chứng thực tế qua ADB & LDPlayer 9
+* Khi có thiết bị hoặc giả lập (như **LDPlayer 9** qua `adb` `127.0.0.1:5555`) đang kết nối:
+  * Build APK và cài đặt (`adb install -r`)[cite: 1].
+  * Khởi chạy ứng dụng và kiểm tra thực tế trạng thái `AccessibilityService`, quyền Overlay / bong bóng nổi, kết nối Gemini API, khả năng quan sát màn hình/game (`screencap`) và đọc `logcat` để phát hiện & sửa lỗi runtime thực tế[cite: 1].
+  * Nhớ đặc thù của CoC: `uiautomator dump` không đọc được bên trong canvas game OpenGL/Vulkan, và trên LDPlayer cần kiểm tra/xác nhận bind của `AccessibilityService`[cite: 1].
+
+### 9.3. Tiêu chí hoàn tất (Definition of Done)
+1. Dự án tại `C:\duan` biên dịch sạch (`./gradlew assembleDebug` thành công) và vượt qua các unit test (`./gradlew testDebugUnitTest` thành công)[cite: 1].
+2. Đã loại bỏ ghi chú cá nhân trong tab AI, tab Quy trình và tab Lịch; UI/UX gọn logic với các khu vực Agent, Kỹ năng, Cài đặt & Trạng thái hệ thống, cùng Bong bóng nổi hoạt động[cite: 1].
+3. Lỗi `AccessibilityService` báo *"dịch vụ không hoạt động"* đã được xử lý và đồng bộ đúng trạng thái thực tế của dịch vụ & hệ thống[cite: 1].
+4. Hệ thống lưu trữ Room DB + bộ nhớ file nội bộ, ngữ cảnh 4 tầng + ngữ cảnh cục bộ, `SceneDetector` & điều hướng, `2-Tier Vision`, kỹ năng linh hoạt, `Event/Drift Detector` + `Self-Healing`, `Grounded Deep Research`, thao tác tự nhiên (`HumanizedGestureBuilder`) & `Smart Sleep` đã được tích hợp và kiểm chứng có log/trạng thái rõ ràng[cite: 1].
+5. Mỗi lượt báo cáo của Cline luôn nêu rõ: **(1) Đã làm gì**, **(2) Kết quả build / test / adb**, **(3) Lỗi còn tồn đọng & bước tiếp theo**[cite: 1].

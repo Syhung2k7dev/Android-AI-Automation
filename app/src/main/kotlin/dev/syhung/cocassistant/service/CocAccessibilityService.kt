@@ -3,11 +3,18 @@ package dev.syhung.cocassistant.service
 import android.accessibilityservice.AccessibilityService
 import android.view.accessibility.AccessibilityEvent
 import android.util.Log
+import android.graphics.Path
+import android.accessibilityservice.GestureDescription
 
 class CocAccessibilityService : AccessibilityService() {
 
     companion object {
         var instance: CocAccessibilityService? = null
+        fun stop() {
+            instance?.performGlobalAction(GLOBAL_ACTION_HOME)
+            instance?.disableSelf()
+        }
+        fun isConnected() = instance != null
     }
 
     override fun onServiceConnected() {

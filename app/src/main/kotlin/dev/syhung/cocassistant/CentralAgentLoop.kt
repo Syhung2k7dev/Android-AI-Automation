@@ -123,7 +123,7 @@ object CentralAgentLoop {
                 val logSummary = recentLogs.joinToString("; ") { "${it.optString("skillId")}=>${it.optString("result")}" }
                 JSONObject()
                     .put("village", village)
-                    .put("activeTimers", timers.size)
+                    .put("activeTimers", timers.length())
                     .put("strategy", globalStrategy)
                     .put("safetyRules", globalSafety)
                     .put("recentLogs", logSummary)
